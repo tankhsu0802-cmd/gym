@@ -61,6 +61,11 @@
       color: #f1f5f9;
     }
 
+    /* Safe area bottom padding for iPhone Home Indicator */
+    .pb-safe {
+      padding-bottom: max(0.65rem, env(safe-area-inset-bottom));
+    }
+
     /* Dynamic Ambient Gradient Orbs for iPhone Frosted Glass Refraction */
     .ambient-bg {
       position: fixed;
@@ -240,6 +245,16 @@
       opacity: 0;
     }
 
+    .toast-slide-enter-active,
+    .toast-slide-leave-active {
+      transition: transform 0.34s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.28s ease;
+    }
+    .toast-slide-enter-from,
+    .toast-slide-leave-to {
+      transform: translateY(-120%);
+      opacity: 0;
+    }
+
     .accordion-enter-active,
     .accordion-leave-active {
       transition: all 0.26s ease;
@@ -262,13 +277,52 @@
   </style>
 </head>
 <body>
-  <div id="app" v-cloak class="min-h-screen pb-16">
+  <div id="app" v-cloak class="min-h-screen pb-28">
     <!-- Ambient Floating Orbs -->
     <div class="ambient-bg">
       <div class="orb orb-1"></div>
       <div class="orb orb-2"></div>
       <div class="orb orb-3"></div>
     </div>
+
+    <!-- ==================== In-App iOS Notification Banner (Tomorrow's Schedule Alert) ==================== -->
+    <transition name="toast-slide">
+      <div
+        v-if="reminderBanner.show"
+        class="fixed top-3 inset-x-3 sm:left-1/2 sm:-translate-x-1/2 sm:max-w-lg z-[60] ios-glass-strong rounded-3xl p-4 shadow-2xl border-2 theme-border"
+      >
+        <div class="flex items-start gap-3">
+          <div class="w-10 h-10 rounded-2xl btn-theme flex items-center justify-center text-lg shrink-0 shadow-md">
+            🔔
+          </div>
+          <div class="flex-1 min-w-0">
+            <div class="flex items-center justify-between gap-2">
+              <h4 class="text-sm font-black">{{ reminderBanner.title }}</h4>
+              <span class="text-[0.68rem] px-2 py-0.5 rounded-lg theme-bg-soft theme-text font-bold shrink-0">
+                {{ reminderBanner.countTag }}
+              </span>
+            </div>
+            <p class="text-xs text-slate-600 dark:text-slate-300 mt-1 whitespace-pre-line leading-relaxed">
+              {{ reminderBanner.body }}
+            </p>
+            <div class="flex items-center gap-2 mt-2.5">
+              <button
+                @click="goToTomorrowSchedule"
+                class="btn-theme px-3 py-1.5 rounded-xl text-xs font-bold"
+              >
+                查看明日排課
+              </button>
+              <button
+                @click="reminderBanner.show = false"
+                class="btn-glass px-3 py-1.5 rounded-xl text-xs font-bold"
+              >
+                我知道了
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </transition>
 
     <!-- Fixed Top Navigation Bar -->
     <header class="sticky top-0 z-40 ios-glass border-x-0 border-t-0">
@@ -279,12 +333,15 @@
           </div>
           <div class="min-w-0">
             <h1 class="text-base font-extrabold tracking-tight truncate">ProCoach</h1>
-            <p class="text-[0.7rem] text-slate-500 dark:text-slate-400 truncate">私人教練學員訓練紀錄系統</p>
+            <p class="text-[0.7rem] text-slate-500 dark:text-slate-400 truncate">
+              {{ currentTab === 'clients' ? '私人教練學員訓練紀錄系統' : '排課行事曆與系統同步' }}
+            </p>
           </div>
         </div>
 
         <div class="flex items-center gap-2 shrink-0">
           <button
+            v-if="currentTab === 'clients'"
             @click="openClientModal()"
             class="btn-theme px-3.5 py-2 rounded-2xl text-xs font-bold flex items-center gap-1.5"
           >
@@ -292,7 +349,16 @@
             <span>新增學員</span>
           </button>
 
-          <!-- User Settings Button (Dark mode, Themes, Font Size integrated here) -->
+          <button
+            v-else
+            @click="openScheduleModal()"
+            class="btn-theme px-3.5 py-2 rounded-2xl text-xs font-bold flex items-center gap-1.5"
+          >
+            <span>+</span>
+            <span>新增排課</span>
+          </button>
+
+          <!-- User Settings Button (Dark mode, Themes, Font Size, Reminder Settings integrated here) -->
           <button
             @click="showSettingsModal = true"
             class="btn-glass w-10 h-10 rounded-2xl flex items-center justify-center text-slate-700 dark:text-slate-200"
@@ -307,8 +373,8 @@
         </div>
       </div>
 
-      <!-- Horizontal Client Selector Pills (Zero clutter, isolated client spaces) -->
-      <div v-if="clients.length > 0" class="max-w-5xl mx-auto px-4 pb-3 pt-1">
+      <!-- Horizontal Client Selector Pills (Shown only in Clients tab) -->
+      <div v-if="currentTab === 'clients' && clients.length > 0" class="max-w-5xl mx-auto px-4 pb-3 pt-1">
         <div class="flex items-center gap-2 overflow-x-auto no-scrollbar pb-0.5">
           <button
             v-for="client in clients"
@@ -338,314 +404,546 @@
     <!-- Main Container -->
     <main class="max-w-5xl mx-auto px-4 pt-5">
       <transition name="page-fade" mode="out-in">
-        <!-- Empty State (Clean start, zero dummy data) -->
-        <div v-if="clients.length === 0" key="empty" class="ios-glass rounded-3xl p-8 sm:p-12 text-center mt-6">
-          <div class="w-16 h-16 mx-auto rounded-3xl btn-theme flex items-center justify-center text-3xl mb-4 shadow-lg">
-            🏋️
-          </div>
-          <h2 class="text-xl font-extrabold mb-2">目前尚未建立任何學員檔案</h2>
-          <p class="text-sm text-slate-600 dark:text-slate-300 max-w-md mx-auto mb-6 leading-relaxed">
-            每位學員都擁有完全獨立的訓練檔案與歷史時間軸，互不干擾。立即建立第一位學員，開始快速記錄課表與追蹤進度。
-          </p>
-          <button
-            @click="openClientModal()"
-            class="btn-theme px-6 py-3.5 rounded-2xl text-sm font-extrabold inline-flex items-center gap-2"
-          >
-            <span>+ 建立第一位學員檔案</span>
-          </button>
-        </div>
-
-        <!-- Selected Client Isolated Workspace -->
-        <div v-else-if="activeClient" :key="activeClient.id" class="space-y-5">
-          <!-- Client Profile Card -->
-          <section class="ios-glass rounded-3xl p-5 space-y-4">
-            <div class="flex flex-wrap items-start justify-between gap-3">
-              <div>
-                <div class="flex items-center gap-2.5 flex-wrap">
-                  <h2 class="text-2xl font-black tracking-tight">{{ activeClient.name }}</h2>
-                  <span v-if="activeClient.nickname" class="text-xs px-2.5 py-1 rounded-xl bg-slate-200/70 dark:bg-slate-700/70 font-semibold">
-                    {{ activeClient.nickname }}
-                  </span>
-                  <span
-                    v-if="getRemainingSessions(activeClient) <= 3"
-                    class="text-xs px-2.5 py-1 rounded-xl bg-amber-500/20 text-amber-700 dark:text-amber-300 font-bold border border-amber-500/30 animate-pulse"
-                  >
-                    ⚠️ 堂數偏低，請留意續約
-                  </span>
-                </div>
-                <p v-if="activeClient.contact || activeClient.expiryDate" class="text-xs text-slate-500 dark:text-slate-400 mt-1 flex flex-wrap gap-x-4 gap-y-1">
-                  <span v-if="activeClient.contact">📞 {{ activeClient.contact }}</span>
-                  <span v-if="activeClient.expiryDate">📅 合約到期：{{ activeClient.expiryDate }}</span>
-                </p>
+        <!-- ==================== TAB 1: CLIENTS & WORKOUT LOGS ==================== -->
+        <div v-if="currentTab === 'clients'" key="tab-clients">
+          <transition name="page-fade" mode="out-in">
+            <!-- Empty State (Clean start, zero dummy data) -->
+            <div v-if="clients.length === 0" key="empty" class="ios-glass rounded-3xl p-8 sm:p-12 text-center mt-6">
+              <div class="w-16 h-16 mx-auto rounded-3xl btn-theme flex items-center justify-center text-3xl mb-4 shadow-lg">
+                🏋️
               </div>
-
-              <div class="flex items-center gap-2 flex-wrap">
-                <button
-                  @click="exportClientPDF(activeClient)"
-                  class="btn-theme px-3.5 py-2 rounded-2xl text-xs font-bold flex items-center gap-1.5"
-                >
-                  <span>📄 匯出 PDF 報告</span>
-                </button>
-                <button
-                  @click="openClientModal(activeClient)"
-                  class="btn-glass px-3.5 py-2 rounded-2xl text-xs font-bold"
-                >
-                  ✏️ 編輯檔案
-                </button>
-                <button
-                  @click="deleteClient(activeClient.id)"
-                  class="btn-glass px-3 py-2 rounded-2xl text-xs font-bold text-rose-500 hover:bg-rose-500/10"
-                >
-                  🗑️
-                </button>
-              </div>
+              <h2 class="text-xl font-extrabold mb-2">目前尚未建立任何學員檔案</h2>
+              <p class="text-sm text-slate-600 dark:text-slate-300 max-w-md mx-auto mb-6 leading-relaxed">
+                每位學員都擁有完全獨立的訓練檔案與歷史時間軸，互不干擾。立即建立第一位學員，開始快速記錄課表與追蹤進度。
+              </p>
+              <button
+                @click="openClientModal()"
+                class="btn-theme px-6 py-3.5 rounded-2xl text-sm font-extrabold inline-flex items-center gap-2"
+              >
+                <span>+ 建立第一位學員檔案</span>
+              </button>
             </div>
 
-            <!-- Session Counter Progress -->
-            <div class="p-4 rounded-2xl bg-white/50 dark:bg-slate-900/45 border border-white/60 dark:border-white/10">
-              <div class="flex items-end justify-between gap-2 mb-2">
-                <div>
-                  <span class="text-xs text-slate-500 dark:text-slate-400 font-semibold">剩餘堂數 / 購買總堂數</span>
-                  <div class="flex items-baseline gap-1.5 mt-0.5">
-                    <span
-                      class="text-2xl font-black"
-                      :class="getRemainingSessions(activeClient) <= 3 ? 'text-amber-500' : 'theme-text'"
+            <!-- Selected Client Isolated Workspace -->
+            <div v-else-if="activeClient" :key="activeClient.id" class="space-y-5">
+              <!-- Client Profile Card -->
+              <section class="ios-glass rounded-3xl p-5 space-y-4">
+                <div class="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <div class="flex items-center gap-2.5 flex-wrap">
+                      <h2 class="text-2xl font-black tracking-tight">{{ activeClient.name }}</h2>
+                      <span v-if="activeClient.nickname" class="text-xs px-2.5 py-1 rounded-xl bg-slate-200/70 dark:bg-slate-700/70 font-semibold">
+                        {{ activeClient.nickname }}
+                      </span>
+                      <span
+                        v-if="getRemainingSessions(activeClient) <= 3"
+                        class="text-xs px-2.5 py-1 rounded-xl bg-amber-500/20 text-amber-700 dark:text-amber-300 font-bold border border-amber-500/30 animate-pulse"
+                      >
+                        ⚠️ 堂數偏低，請留意續約
+                      </span>
+                    </div>
+                    <p v-if="activeClient.contact || activeClient.expiryDate" class="text-xs text-slate-500 dark:text-slate-400 mt-1 flex flex-wrap gap-x-4 gap-y-1">
+                      <span v-if="activeClient.contact">📞 {{ activeClient.contact }}</span>
+                      <span v-if="activeClient.expiryDate">📅 合約到期：{{ activeClient.expiryDate }}</span>
+                    </p>
+                  </div>
+
+                  <div class="flex items-center gap-2 flex-wrap">
+                    <button
+                      @click="exportClientPDF(activeClient)"
+                      class="btn-theme px-3.5 py-2 rounded-2xl text-xs font-bold flex items-center gap-1.5"
                     >
-                      {{ getRemainingSessions(activeClient) }}
-                    </span>
-                    <span class="text-sm font-bold text-slate-500 dark:text-slate-400">/ {{ activeClient.purchasedSessions }} 堂</span>
-                    <span class="text-xs text-slate-400 ml-1">（已上 {{ activeClient.usedSessions }} 堂）</span>
+                      <span>📄 匯出 PDF 報告</span>
+                    </button>
+                    <button
+                      @click="openClientModal(activeClient)"
+                      class="btn-glass px-3.5 py-2 rounded-2xl text-xs font-bold"
+                    >
+                      ✏️ 編輯 / 續約
+                    </button>
+                    <button
+                      @click="deleteClient(activeClient.id)"
+                      class="btn-glass px-3 py-2 rounded-2xl text-xs font-bold text-rose-500 hover:bg-rose-500/10"
+                    >
+                      🗑️
+                    </button>
                   </div>
                 </div>
-                <div class="flex items-center gap-1.5">
-                  <button
-                    @click="adjustUsedSessions(activeClient, -1)"
-                    class="btn-glass w-8 h-8 rounded-xl text-sm font-black flex items-center justify-center"
-                    title="補回 1 堂"
-                  >
-                    +1
-                  </button>
-                  <button
-                    @click="adjustUsedSessions(activeClient, 1)"
-                    class="btn-glass w-8 h-8 rounded-xl text-sm font-black flex items-center justify-center"
-                    title="手動扣 1 堂"
-                  >
-                    -1
-                  </button>
-                </div>
-              </div>
-              <div class="w-full h-2.5 rounded-full bg-slate-200/80 dark:bg-slate-800 overflow-hidden">
-                <div
-                  class="h-full rounded-full transition-all duration-500"
-                  :class="getRemainingSessions(activeClient) <= 3 ? 'bg-amber-500' : 'theme-bg'"
-                  :style="{ width: getSessionPercent(activeClient) + '%' }"
-                ></div>
-              </div>
-            </div>
 
-            <!-- Goals & Red Flag Injury Alert -->
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
-              <div class="p-3.5 rounded-2xl bg-white/45 dark:bg-slate-900/40 border border-white/60 dark:border-white/10">
-                <div class="text-xs font-bold text-slate-500 dark:text-slate-400 mb-2">🎯 主要訴求</div>
-                <div class="flex flex-wrap gap-1.5">
-                  <span
-                    v-for="goal in activeClient.goals"
-                    :key="goal"
-                    class="px-2.5 py-1 rounded-xl text-xs font-bold theme-bg-soft theme-text"
-                  >
-                    {{ goal === '其他' && activeClient.customGoal ? '其他：' + activeClient.customGoal : goal }}
-                  </span>
-                  <span v-if="!activeClient.goals || activeClient.goals.length === 0" class="text-xs text-slate-400">尚未設定</span>
+                <!-- Session Counter Progress -->
+                <div class="p-4 rounded-2xl bg-white/50 dark:bg-slate-900/45 border border-white/60 dark:border-white/10">
+                  <div class="flex items-end justify-between gap-2 mb-2">
+                    <div>
+                      <span class="text-xs text-slate-500 dark:text-slate-400 font-semibold">剩餘堂數 / 購買總堂數</span>
+                      <div class="flex items-baseline gap-1.5 mt-0.5">
+                        <span
+                          class="text-2xl font-black"
+                          :class="getRemainingSessions(activeClient) <= 3 ? 'text-amber-500' : 'theme-text'"
+                        >
+                          {{ getRemainingSessions(activeClient) }}
+                        </span>
+                        <span class="text-sm font-bold text-slate-500 dark:text-slate-400">/ {{ activeClient.purchasedSessions }} 堂</span>
+                        <span class="text-xs text-slate-400 ml-1">（已上 {{ activeClient.usedSessions }} 堂）</span>
+                      </div>
+                    </div>
+                    <div class="flex items-center gap-1.5">
+                      <button
+                        @click="adjustUsedSessions(activeClient, -1)"
+                        class="btn-glass w-8 h-8 rounded-xl text-sm font-black flex items-center justify-center"
+                        title="補回 1 堂"
+                      >
+                        +1
+                      </button>
+                      <button
+                        @click="adjustUsedSessions(activeClient, 1)"
+                        class="btn-glass w-8 h-8 rounded-xl text-sm font-black flex items-center justify-center"
+                        title="手動扣 1 堂"
+                      >
+                        -1
+                      </button>
+                    </div>
+                  </div>
+                  <div class="w-full h-2.5 rounded-full bg-slate-200/80 dark:bg-slate-800 overflow-hidden">
+                    <div
+                      class="h-full rounded-full transition-all duration-500"
+                      :class="getRemainingSessions(activeClient) <= 3 ? 'bg-amber-500' : 'theme-bg'"
+                      :style="{ width: getSessionPercent(activeClient) + '%' }"
+                    ></div>
+                  </div>
                 </div>
+
+                <!-- Goals & Red Flag Injury Alert -->
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <div class="p-3.5 rounded-2xl bg-white/45 dark:bg-slate-900/40 border border-white/60 dark:border-white/10">
+                    <div class="text-xs font-bold text-slate-500 dark:text-slate-400 mb-2">🎯 主要訴求</div>
+                    <div class="flex flex-wrap gap-1.5">
+                      <span
+                        v-for="goal in activeClient.goals"
+                        :key="goal"
+                        class="px-2.5 py-1 rounded-xl text-xs font-bold theme-bg-soft theme-text"
+                      >
+                        {{ goal === '其他' && activeClient.customGoal ? '其他：' + activeClient.customGoal : goal }}
+                      </span>
+                      <span v-if="!activeClient.goals || activeClient.goals.length === 0" class="text-xs text-slate-400">尚未設定</span>
+                    </div>
+                  </div>
+
+                  <div
+                    class="p-3.5 rounded-2xl border"
+                    :class="activeClient.injuries
+                      ? 'bg-rose-500/10 border-rose-500/30'
+                      : 'bg-white/45 dark:bg-slate-900/40 border-white/60 dark:border-white/10'"
+                  >
+                    <div class="text-xs font-bold mb-1" :class="activeClient.injuries ? 'text-rose-600 dark:text-rose-400' : 'text-slate-500 dark:text-slate-400'">
+                      🚨 傷病史與動作禁忌
+                    </div>
+                    <p class="text-xs leading-relaxed font-medium" :class="activeClient.injuries ? 'text-rose-700 dark:text-rose-200' : 'text-slate-400'">
+                      {{ activeClient.injuries || '無特殊傷病史記錄' }}
+                    </p>
+                  </div>
+                </div>
+
+                <!-- Body Composition Metrics -->
+                <div v-if="hasBodyMetrics(activeClient)" class="grid grid-cols-2 sm:grid-cols-5 gap-2">
+                  <div v-if="activeClient.weight" class="p-2.5 rounded-2xl bg-white/45 dark:bg-slate-900/40 text-center">
+                    <div class="text-[0.68rem] text-slate-500 dark:text-slate-400">體重</div>
+                    <div class="text-sm font-extrabold">{{ activeClient.weight }} kg</div>
+                  </div>
+                  <div v-if="activeClient.muscleMass" class="p-2.5 rounded-2xl bg-white/45 dark:bg-slate-900/40 text-center">
+                    <div class="text-[0.68rem] text-slate-500 dark:text-slate-400">骨骼肌重</div>
+                    <div class="text-sm font-extrabold">{{ activeClient.muscleMass }} kg</div>
+                  </div>
+                  <div v-if="activeClient.bodyFat" class="p-2.5 rounded-2xl bg-white/45 dark:bg-slate-900/40 text-center">
+                    <div class="text-[0.68rem] text-slate-500 dark:text-slate-400">體脂率</div>
+                    <div class="text-sm font-extrabold">{{ activeClient.bodyFat }} %</div>
+                  </div>
+                  <div v-if="activeClient.waist" class="p-2.5 rounded-2xl bg-white/45 dark:bg-slate-900/40 text-center">
+                    <div class="text-[0.68rem] text-slate-500 dark:text-slate-400">腰圍</div>
+                    <div class="text-sm font-extrabold">{{ activeClient.waist }} cm</div>
+                  </div>
+                  <div v-if="activeClient.hip" class="p-2.5 rounded-2xl bg-white/45 dark:bg-slate-900/40 text-center">
+                    <div class="text-[0.68rem] text-slate-500 dark:text-slate-400">臀圍</div>
+                    <div class="text-sm font-extrabold">{{ activeClient.hip }} cm</div>
+                  </div>
+                </div>
+              </section>
+
+              <!-- Training Logs Header -->
+              <div class="flex items-center justify-between gap-3 pt-1">
+                <div>
+                  <h3 class="text-lg font-extrabold">訓練日誌時間軸</h3>
+                  <p class="text-xs text-slate-500 dark:text-slate-400">共 {{ activeClient.logs.length }} 筆訓練紀錄（點開卡片檢視詳情）</p>
+                </div>
+                <button
+                  @click="openLogModal()"
+                  class="btn-theme px-4 py-2.5 rounded-2xl text-xs font-extrabold flex items-center gap-1.5"
+                >
+                  <span>+ 新增訓練紀錄</span>
+                </button>
               </div>
 
-              <div
-                class="p-3.5 rounded-2xl border"
-                :class="activeClient.injuries
-                  ? 'bg-rose-500/10 border-rose-500/30'
-                  : 'bg-white/45 dark:bg-slate-900/40 border-white/60 dark:border-white/10'"
-              >
-                <div class="text-xs font-bold mb-1" :class="activeClient.injuries ? 'text-rose-600 dark:text-rose-400' : 'text-slate-500 dark:text-slate-400'">
-                  🚨 傷病史與動作禁忌
-                </div>
-                <p class="text-xs leading-relaxed font-medium" :class="activeClient.injuries ? 'text-rose-700 dark:text-rose-200' : 'text-slate-400'">
-                  {{ activeClient.injuries || '無特殊傷病史記錄' }}
+              <!-- Training Logs Empty State -->
+              <div v-if="activeClient.logs.length === 0" class="ios-glass rounded-3xl p-8 text-center">
+                <p class="text-sm font-semibold text-slate-500 dark:text-slate-400 mb-3">
+                  {{ activeClient.name }} 還沒有任何訓練紀錄
                 </p>
+                <button @click="openLogModal()" class="btn-theme px-5 py-2.5 rounded-2xl text-xs font-bold">
+                  立即登記第一堂課
+                </button>
+              </div>
+
+              <!-- Collapsible Training Log Cards -->
+              <div v-else class="space-y-3">
+                <article
+                  v-for="(log, idx) in activeClient.logs"
+                  :key="log.id"
+                  class="ios-glass rounded-3xl overflow-hidden"
+                >
+                  <!-- Card Header -->
+                  <div
+                    @click="toggleLogExpand(log.id)"
+                    class="p-4 cursor-pointer flex items-center justify-between gap-3 select-none hover:bg-white/30 dark:hover:bg-white/5 transition"
+                  >
+                    <div class="min-w-0">
+                      <div class="flex items-center gap-2 flex-wrap">
+                        <span class="px-2.5 py-0.5 rounded-xl text-xs font-extrabold theme-bg-soft theme-text">
+                          第 {{ log.sessionNumber || (activeClient.logs.length - idx) }} 堂
+                        </span>
+                        <span class="text-sm font-extrabold">{{ log.date }}</span>
+                        <span class="text-xs font-bold text-slate-600 dark:text-slate-300">· {{ log.bodyPart || '全身訓練' }}</span>
+                      </div>
+                      <div class="text-xs text-slate-500 dark:text-slate-400 mt-1 flex flex-wrap items-center gap-x-3 gap-y-1">
+                        <span>動作數：{{ log.exercises.length }}</span>
+                        <span>總訓練量：{{ calcLogVolume(log).toLocaleString() }} kg</span>
+                        <span v-if="log.condition">狀態：{{ log.condition }}</span>
+                      </div>
+                    </div>
+
+                    <div class="flex items-center gap-2 shrink-0">
+                      <button
+                        @click.stop="openLogModal(log)"
+                        class="btn-glass px-2.5 py-1.5 rounded-xl text-xs font-bold"
+                      >
+                        編輯
+                      </button>
+                      <button
+                        @click.stop="deleteLog(log.id)"
+                        class="btn-glass px-2.5 py-1.5 rounded-xl text-xs font-bold text-rose-500"
+                      >
+                        刪除
+                      </button>
+                      <span
+                        class="w-7 h-7 rounded-xl bg-slate-200/60 dark:bg-slate-800/70 flex items-center justify-center text-xs transition-transform duration-200"
+                        :class="expandedLogIds.includes(log.id) ? 'rotate-180' : ''"
+                      >
+                        ▼
+                      </span>
+                    </div>
+                  </div>
+
+                  <!-- Collapsible Body -->
+                  <transition name="accordion">
+                    <div v-if="expandedLogIds.includes(log.id)" class="px-4 pb-4 pt-1 border-t border-slate-200/50 dark:border-white/10 space-y-3">
+                      <div
+                        v-for="(ex, eIdx) in log.exercises"
+                        :key="ex.id || eIdx"
+                        class="p-3.5 rounded-2xl bg-white/55 dark:bg-slate-900/50 border border-white/60 dark:border-white/10 space-y-2.5"
+                      >
+                        <!-- Exercise Title + Equipment Image Side-by-Side -->
+                        <div class="flex items-center gap-3">
+                          <div
+                            @click="openLightbox(getEquipmentPreview(ex), ex.name)"
+                            class="w-14 h-14 rounded-2xl overflow-hidden bg-slate-100 dark:bg-slate-800 border border-slate-200/70 dark:border-white/10 shrink-0 cursor-zoom-in flex items-center justify-center shadow-sm"
+                            title="點擊放大器材圖片"
+                          >
+                            <img
+                              :src="getEquipmentPreview(ex)"
+                              :alt="ex.name"
+                              class="w-full h-full object-cover"
+                            />
+                          </div>
+                          <div class="min-w-0 flex-1">
+                            <div class="flex items-center gap-2 flex-wrap">
+                              <span class="text-sm font-extrabold">{{ eIdx + 1 }}. {{ ex.name || '未命名動作' }}</span>
+                              <span v-if="ex.equipmentType" class="text-[0.68rem] px-2 py-0.5 rounded-lg bg-slate-200/70 dark:bg-slate-700/70 font-semibold">
+                                {{ ex.equipmentType }}
+                              </span>
+                            </div>
+                            <p v-if="ex.machineSetting" class="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                              🔧 器材刻度：{{ ex.machineSetting }}
+                            </p>
+                          </div>
+                        </div>
+
+                        <!-- Sets Table -->
+                        <div class="space-y-1.5">
+                          <div
+                            v-for="(s, sIdx) in ex.sets"
+                            :key="sIdx"
+                            class="flex items-center justify-between text-xs px-3 py-1.5 rounded-xl bg-white/70 dark:bg-slate-800/60"
+                          >
+                            <span class="font-bold text-slate-500 dark:text-slate-400">Set {{ sIdx + 1 }}</span>
+                            <span class="font-extrabold">
+                              {{ s.weight || 0 }} {{ ex.unit || 'kg' }} × {{ s.reps || 0 }} 下
+                            </span>
+                            <span
+                              class="px-2 py-0.5 rounded-lg text-[0.68rem] font-bold"
+                              :class="Number(s.rpe) >= 9 ? 'bg-rose-500/20 text-rose-600 dark:text-rose-300' : 'theme-bg-soft theme-text'"
+                            >
+                              RPE {{ s.rpe || '-' }}
+                            </span>
+                          </div>
+                        </div>
+
+                        <p v-if="ex.notes" class="text-xs text-slate-600 dark:text-slate-300 bg-slate-100/70 dark:bg-slate-800/50 px-3 py-2 rounded-xl">
+                          📝 {{ ex.notes }}
+                        </p>
+                      </div>
+
+                      <div v-if="log.summaryNotes" class="text-xs p-3 rounded-2xl theme-bg-soft font-medium">
+                        💬 課後總結：{{ log.summaryNotes }}
+                      </div>
+                    </div>
+                  </transition>
+                </article>
+              </div>
+            </div>
+          </transition>
+        </div>
+
+        <!-- ==================== TAB 2: SCHEDULE CALENDAR & CALENDAR SYNC ==================== -->
+        <div v-else-if="currentTab === 'schedule'" key="tab-schedule" class="space-y-5">
+          <!-- Tomorrow Reminder Quick Card (if tomorrow has classes) -->
+          <section
+            v-if="tomorrowSchedules.length > 0"
+            class="ios-glass rounded-3xl p-4 border-2 theme-border flex flex-wrap items-center justify-between gap-3"
+          >
+            <div class="flex items-center gap-3 min-w-0">
+              <div class="w-10 h-10 rounded-2xl btn-theme flex items-center justify-center text-lg shrink-0">
+                🔔
+              </div>
+              <div class="min-w-0">
+                <div class="text-sm font-black">明天（{{ tomorrowDateStr }}）共有 {{ tomorrowSchedules.length }} 堂排課</div>
+                <div class="text-xs text-slate-600 dark:text-slate-300 truncate">
+                  {{ tomorrowSchedules.map(s => `${s.startTime} ${s.clientName}`).join('、') }}
+                </div>
+              </div>
+            </div>
+            <button
+              @click="selectCalendarDate(tomorrowDateStr)"
+              class="btn-glass px-3.5 py-2 rounded-2xl text-xs font-extrabold theme-text shrink-0"
+            >
+              檢視明日課表
+            </button>
+          </section>
+
+          <!-- Interactive Monthly Calendar Card -->
+          <section class="ios-glass rounded-3xl p-5 space-y-4">
+            <div class="flex flex-wrap items-center justify-between gap-3">
+              <div class="flex items-center gap-2">
+                <button @click="changeCalMonth(-1)" class="btn-glass w-9 h-9 rounded-xl font-black text-sm flex items-center justify-center">
+                  ‹
+                </button>
+                <h2 class="text-lg font-black min-w-[7.5rem] text-center">
+                  {{ calYear }} 年 {{ calMonth + 1 }} 月
+                </h2>
+                <button @click="changeCalMonth(1)" class="btn-glass w-9 h-9 rounded-xl font-black text-sm flex items-center justify-center">
+                  ›
+                </button>
+                <button @click="jumpToToday" class="btn-glass px-3 py-1.5 rounded-xl text-xs font-bold ml-1">
+                  今天
+                </button>
+              </div>
+
+              <div class="flex items-center gap-2">
+                <button
+                  v-if="currentMonthSchedules.length > 0"
+                  @click="exportMonthICS"
+                  class="btn-glass px-3.5 py-2 rounded-2xl text-xs font-extrabold theme-text flex items-center gap-1.5"
+                >
+                  <span>📲 同步本月全部 (.ics)</span>
+                </button>
+                <button
+                  @click="openScheduleModal(null, selectedCalDate)"
+                  class="btn-theme px-3.5 py-2 rounded-2xl text-xs font-extrabold"
+                >
+                  + 預約排課
+                </button>
               </div>
             </div>
 
-            <!-- Body Composition Metrics -->
-            <div v-if="hasBodyMetrics(activeClient)" class="grid grid-cols-2 sm:grid-cols-5 gap-2">
-              <div v-if="activeClient.weight" class="p-2.5 rounded-2xl bg-white/45 dark:bg-slate-900/40 text-center">
-                <div class="text-[0.68rem] text-slate-500 dark:text-slate-400">體重</div>
-                <div class="text-sm font-extrabold">{{ activeClient.weight }} kg</div>
-              </div>
-              <div v-if="activeClient.muscleMass" class="p-2.5 rounded-2xl bg-white/45 dark:bg-slate-900/40 text-center">
-                <div class="text-[0.68rem] text-slate-500 dark:text-slate-400">骨骼肌重</div>
-                <div class="text-sm font-extrabold">{{ activeClient.muscleMass }} kg</div>
-              </div>
-              <div v-if="activeClient.bodyFat" class="p-2.5 rounded-2xl bg-white/45 dark:bg-slate-900/40 text-center">
-                <div class="text-[0.68rem] text-slate-500 dark:text-slate-400">體脂率</div>
-                <div class="text-sm font-extrabold">{{ activeClient.bodyFat }} %</div>
-              </div>
-              <div v-if="activeClient.waist" class="p-2.5 rounded-2xl bg-white/45 dark:bg-slate-900/40 text-center">
-                <div class="text-[0.68rem] text-slate-500 dark:text-slate-400">腰圍</div>
-                <div class="text-sm font-extrabold">{{ activeClient.waist }} cm</div>
-              </div>
-              <div v-if="activeClient.hip" class="p-2.5 rounded-2xl bg-white/45 dark:bg-slate-900/40 text-center">
-                <div class="text-[0.68rem] text-slate-500 dark:text-slate-400">臀圍</div>
-                <div class="text-sm font-extrabold">{{ activeClient.hip }} cm</div>
-              </div>
+            <!-- Weekday Headers -->
+            <div class="grid grid-cols-7 gap-1.5 text-center text-xs font-extrabold text-slate-500 dark:text-slate-400">
+              <div class="text-rose-500">日</div>
+              <div>一</div>
+              <div>二</div>
+              <div>三</div>
+              <div>四</div>
+              <div>五</div>
+              <div class="text-sky-500">六</div>
+            </div>
+
+            <!-- Calendar Grid -->
+            <div class="grid grid-cols-7 gap-1.5">
+              <button
+                v-for="cell in calendarCells"
+                :key="cell.key"
+                type="button"
+                :disabled="!cell.dateStr"
+                @click="cell.dateStr && selectCalendarDate(cell.dateStr)"
+                class="min-h-[3.3rem] sm:min-h-[4rem] rounded-2xl p-1.5 flex flex-col items-center justify-between transition-all duration-200 relative"
+                :class="[
+                  !cell.dateStr ? 'opacity-0 pointer-events-none' : 'cursor-pointer active:scale-95',
+                  cell.dateStr === selectedCalDate
+                    ? 'btn-theme shadow-md'
+                    : (cell.dateStr === todayDateStr
+                      ? 'bg-white/80 dark:bg-slate-800/80 border-2 theme-border font-black'
+                      : 'bg-white/45 dark:bg-slate-900/40 hover:bg-white/75 dark:hover:bg-slate-800/70 border border-white/50 dark:border-white/10')
+                ]"
+              >
+                <span class="text-xs font-extrabold">{{ cell.day }}</span>
+                <div v-if="cell.count > 0" class="flex items-center gap-0.5">
+                  <span
+                    class="px-1.5 py-0.5 rounded-md text-[0.6rem] font-black leading-none"
+                    :class="cell.dateStr === selectedCalDate ? 'bg-white/25 text-white' : 'theme-bg-soft theme-text'"
+                  >
+                    {{ cell.count }} 堂
+                  </span>
+                </div>
+                <div v-else class="h-3"></div>
+              </button>
             </div>
           </section>
 
-          <!-- Training Logs Header -->
-          <div class="flex items-center justify-between gap-3 pt-1">
-            <div>
-              <h3 class="text-lg font-extrabold">訓練日誌時間軸</h3>
-              <p class="text-xs text-slate-500 dark:text-slate-400">共 {{ activeClient.logs.length }} 筆訓練紀錄（點開卡片檢視詳情）</p>
-            </div>
-            <button
-              @click="openLogModal()"
-              class="btn-theme px-4 py-2.5 rounded-2xl text-xs font-extrabold flex items-center gap-1.5"
-            >
-              <span>+ 新增訓練紀錄</span>
-            </button>
-          </div>
-
-          <!-- Training Logs Empty State -->
-          <div v-if="activeClient.logs.length === 0" class="ios-glass rounded-3xl p-8 text-center">
-            <p class="text-sm font-semibold text-slate-500 dark:text-slate-400 mb-3">
-              {{ activeClient.name }} 還沒有任何訓練紀錄
-            </p>
-            <button @click="openLogModal()" class="btn-theme px-5 py-2.5 rounded-2xl text-xs font-bold">
-              立即登記第一堂課
-            </button>
-          </div>
-
-          <!-- Collapsible Training Log Cards -->
-          <div v-else class="space-y-3">
-            <article
-              v-for="(log, idx) in activeClient.logs"
-              :key="log.id"
-              class="ios-glass rounded-3xl overflow-hidden"
-            >
-              <!-- Card Header -->
-              <div
-                @click="toggleLogExpand(log.id)"
-                class="p-4 cursor-pointer flex items-center justify-between gap-3 select-none hover:bg-white/30 dark:hover:bg-white/5 transition"
+          <!-- Selected Date Schedule List -->
+          <section class="space-y-3">
+            <div class="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <h3 class="text-base font-black">
+                  📅 {{ selectedCalDate }} 排課清單
+                  <span v-if="selectedCalDate === todayDateStr" class="text-xs theme-text ml-1">（今天）</span>
+                  <span v-else-if="selectedCalDate === tomorrowDateStr" class="text-xs theme-text ml-1">（明天）</span>
+                </h3>
+                <p class="text-xs text-slate-500 dark:text-slate-400">
+                  共 {{ selectedDateSchedules.length }} 堂預約課程
+                </p>
+              </div>
+              <button
+                @click="openScheduleModal(null, selectedCalDate)"
+                class="btn-glass px-3.5 py-2 rounded-2xl text-xs font-extrabold theme-text"
               >
-                <div class="min-w-0">
-                  <div class="flex items-center gap-2 flex-wrap">
-                    <span class="px-2.5 py-0.5 rounded-xl text-xs font-extrabold theme-bg-soft theme-text">
-                      第 {{ log.sessionNumber || (activeClient.logs.length - idx) }} 堂
-                    </span>
-                    <span class="text-sm font-extrabold">{{ log.date }}</span>
-                    <span class="text-xs font-bold text-slate-600 dark:text-slate-300">· {{ log.bodyPart || '全身訓練' }}</span>
+                + 新增此日排課
+              </button>
+            </div>
+
+            <div v-if="selectedDateSchedules.length === 0" class="ios-glass rounded-3xl p-8 text-center space-y-3">
+              <div class="text-3xl">🗓️</div>
+              <p class="text-sm font-semibold text-slate-500 dark:text-slate-400">
+                {{ selectedCalDate }} 目前尚無排課
+              </p>
+              <button
+                @click="openScheduleModal(null, selectedCalDate)"
+                class="btn-theme px-5 py-2.5 rounded-2xl text-xs font-bold"
+              >
+                立即安排課程
+              </button>
+            </div>
+
+            <div v-else class="space-y-3">
+              <article
+                v-for="item in selectedDateSchedules"
+                :key="item.id"
+                class="ios-glass rounded-3xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+              >
+                <div class="flex items-start gap-3 min-w-0">
+                  <div class="px-3 py-2 rounded-2xl theme-bg-soft theme-text text-center shrink-0 min-w-[5.2rem]">
+                    <div class="text-sm font-black">{{ item.startTime }}</div>
+                    <div class="text-[0.65rem] font-bold opacity-80">至 {{ item.endTime }}</div>
                   </div>
-                  <div class="text-xs text-slate-500 dark:text-slate-400 mt-1 flex flex-wrap items-center gap-x-3 gap-y-1">
-                    <span>動作數：{{ log.exercises.length }}</span>
-                    <span>總訓練量：{{ calcLogVolume(log).toLocaleString() }} kg</span>
-                    <span v-if="log.condition">狀態：{{ log.condition }}</span>
+                  <div class="min-w-0">
+                    <div class="flex items-center gap-2 flex-wrap">
+                      <span class="text-base font-black">{{ item.clientName }}</span>
+                      <span v-if="item.topic" class="text-xs px-2 py-0.5 rounded-lg bg-slate-200/70 dark:bg-slate-700/70 font-bold">
+                        {{ item.topic }}
+                      </span>
+                    </div>
+                    <div class="text-xs text-slate-500 dark:text-slate-400 mt-1 flex flex-wrap gap-x-3 gap-y-0.5">
+                      <span v-if="item.location">📍 {{ item.location }}</span>
+                      <span>⏱️ {{ item.duration }} 分鐘</span>
+                    </div>
+                    <p v-if="item.notes" class="text-xs text-slate-600 dark:text-slate-300 mt-1">
+                      📝 {{ item.notes }}
+                    </p>
                   </div>
                 </div>
 
-                <div class="flex items-center gap-2 shrink-0">
+                <div class="flex items-center gap-2 flex-wrap shrink-0">
+                  <!-- Cross-Platform Calendar Sync Button -->
                   <button
-                    @click.stop="openLogModal(log)"
-                    class="btn-glass px-2.5 py-1.5 rounded-xl text-xs font-bold"
+                    @click="openSyncModal(item)"
+                    class="btn-theme px-3.5 py-2 rounded-2xl text-xs font-extrabold flex items-center gap-1.5"
+                  >
+                    <span>📲 同步至行事曆</span>
+                  </button>
+                  <button
+                    @click="openScheduleModal(item)"
+                    class="btn-glass px-3 py-2 rounded-2xl text-xs font-bold"
                   >
                     編輯
                   </button>
                   <button
-                    @click.stop="deleteLog(log.id)"
-                    class="btn-glass px-2.5 py-1.5 rounded-xl text-xs font-bold text-rose-500"
+                    @click="deleteSchedule(item.id)"
+                    class="btn-glass px-3 py-2 rounded-2xl text-xs font-bold text-rose-500"
                   >
                     刪除
                   </button>
-                  <span
-                    class="w-7 h-7 rounded-xl bg-slate-200/60 dark:bg-slate-800/70 flex items-center justify-center text-xs transition-transform duration-200"
-                    :class="expandedLogIds.includes(log.id) ? 'rotate-180' : ''"
-                  >
-                    ▼
-                  </span>
                 </div>
-              </div>
-
-              <!-- Collapsible Body -->
-              <transition name="accordion">
-                <div v-if="expandedLogIds.includes(log.id)" class="px-4 pb-4 pt-1 border-t border-slate-200/50 dark:border-white/10 space-y-3">
-                  <div
-                    v-for="(ex, eIdx) in log.exercises"
-                    :key="ex.id || eIdx"
-                    class="p-3.5 rounded-2xl bg-white/55 dark:bg-slate-900/50 border border-white/60 dark:border-white/10 space-y-2.5"
-                  >
-                    <!-- Exercise Title + Equipment Image Side-by-Side -->
-                    <div class="flex items-center gap-3">
-                      <div
-                        @click="openLightbox(getEquipmentPreview(ex), ex.name)"
-                        class="w-14 h-14 rounded-2xl overflow-hidden bg-slate-100 dark:bg-slate-800 border border-slate-200/70 dark:border-white/10 shrink-0 cursor-zoom-in flex items-center justify-center shadow-sm"
-                        title="點擊放大器材圖片"
-                      >
-                        <img
-                          :src="getEquipmentPreview(ex)"
-                          :alt="ex.name"
-                          class="w-full h-full object-cover"
-                        />
-                      </div>
-                      <div class="min-w-0 flex-1">
-                        <div class="flex items-center gap-2 flex-wrap">
-                          <span class="text-sm font-extrabold">{{ eIdx + 1 }}. {{ ex.name || '未命名動作' }}</span>
-                          <span v-if="ex.equipmentType" class="text-[0.68rem] px-2 py-0.5 rounded-lg bg-slate-200/70 dark:bg-slate-700/70 font-semibold">
-                            {{ ex.equipmentType }}
-                          </span>
-                        </div>
-                        <p v-if="ex.machineSetting" class="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                          🔧 器材刻度：{{ ex.machineSetting }}
-                        </p>
-                      </div>
-                    </div>
-
-                    <!-- Sets Table -->
-                    <div class="space-y-1.5">
-                      <div
-                        v-for="(s, sIdx) in ex.sets"
-                        :key="sIdx"
-                        class="flex items-center justify-between text-xs px-3 py-1.5 rounded-xl bg-white/70 dark:bg-slate-800/60"
-                      >
-                        <span class="font-bold text-slate-500 dark:text-slate-400">Set {{ sIdx + 1 }}</span>
-                        <span class="font-extrabold">
-                          {{ s.weight || 0 }} {{ ex.unit || 'kg' }} × {{ s.reps || 0 }} 下
-                        </span>
-                        <span
-                          class="px-2 py-0.5 rounded-lg text-[0.68rem] font-bold"
-                          :class="Number(s.rpe) >= 9 ? 'bg-rose-500/20 text-rose-600 dark:text-rose-300' : 'theme-bg-soft theme-text'"
-                        >
-                          RPE {{ s.rpe || '-' }}
-                        </span>
-                      </div>
-                    </div>
-
-                    <p v-if="ex.notes" class="text-xs text-slate-600 dark:text-slate-300 bg-slate-100/70 dark:bg-slate-800/50 px-3 py-2 rounded-xl">
-                      📝 {{ ex.notes }}
-                    </p>
-                  </div>
-
-                  <div v-if="log.summaryNotes" class="text-xs p-3 rounded-2xl theme-bg-soft font-medium">
-                    💬 課後總結：{{ log.summaryNotes }}
-                  </div>
-                </div>
-              </transition>
-            </article>
-          </div>
+              </article>
+            </div>
+          </section>
         </div>
       </transition>
     </main>
 
-    <!-- ==================== MODAL 1: User Settings (Dark Mode, Themes, Font Size 100%-200%) ==================== -->
+    <!-- ==================== FIXED BOTTOM NAVIGATION BAR (iOS Frosted Glass) ==================== -->
+    <nav class="fixed bottom-0 inset-x-0 z-40 ios-glass border-x-0 border-b-0 pb-safe">
+      <div class="max-w-5xl mx-auto px-4 pt-2 grid grid-cols-2 gap-3">
+        <button
+          @click="currentTab = 'clients'"
+          class="py-2 rounded-2xl flex flex-col items-center justify-center gap-0.5 transition-all duration-200 active:scale-95"
+          :class="currentTab === 'clients' ? 'theme-bg-soft theme-text font-black' : 'text-slate-500 dark:text-slate-400 font-bold'"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" />
+          </svg>
+          <span class="text-xs">學員紀錄</span>
+        </button>
+
+        <button
+          @click="currentTab = 'schedule'"
+          class="py-2 rounded-2xl flex flex-col items-center justify-center gap-0.5 transition-all duration-200 active:scale-95 relative"
+          :class="currentTab === 'schedule' ? 'theme-bg-soft theme-text font-black' : 'text-slate-500 dark:text-slate-400 font-bold'"
+        >
+          <div class="relative">
+            <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.2">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+            </svg>
+            <span
+              v-if="tomorrowSchedules.length > 0"
+              class="absolute -top-1.5 -right-2.5 min-w-[1.1rem] h-[1.1rem] px-1 rounded-full bg-rose-500 text-white text-[0.6rem] font-black flex items-center justify-center shadow"
+            >
+              {{ tomorrowSchedules.length }}
+            </span>
+          </div>
+          <span class="text-xs">排課</span>
+        </button>
+      </div>
+    </nav>
+
+    <!-- ==================== MODAL 1: User Settings (Dark Mode, Themes, Font Size 100%-200%, Tomorrow Reminder) ==================== -->
     <transition name="modal-pop">
       <div v-if="showSettingsModal" @click.self="showSettingsModal = false" class="fixed inset-0 z-50 bg-slate-950/50 backdrop-blur-sm flex items-center justify-center p-4">
-        <div class="modal-box ios-glass-strong rounded-3xl w-full max-w-md p-6 space-y-5 max-h-[90vh] overflow-y-auto">
+        <div class="modal-box ios-glass-strong rounded-3xl w-full max-w-md p-6 space-y-4 max-h-[90vh] overflow-y-auto">
           <div class="flex items-center justify-between">
             <h3 class="text-lg font-black">⚙️ 使用者設定</h3>
             <button @click="showSettingsModal = false" class="btn-glass w-8 h-8 rounded-xl text-sm font-bold">✕</button>
@@ -696,12 +994,7 @@
               </span>
             </div>
             <div class="flex items-center gap-3">
-              <button
-                @click="adjustFontScale(-10)"
-                class="btn-glass px-3 py-1.5 rounded-xl text-xs font-black"
-              >
-                A-
-              </button>
+              <button @click="adjustFontScale(-10)" class="btn-glass px-3 py-1.5 rounded-xl text-xs font-black">A-</button>
               <input
                 type="range"
                 min="100"
@@ -711,17 +1004,84 @@
                 @input="applySettings"
                 class="flex-1 cursor-pointer"
               />
-              <button
-                @click="adjustFontScale(10)"
-                class="btn-glass px-3 py-1.5 rounded-xl text-xs font-black"
-              >
-                A+
-              </button>
+              <button @click="adjustFontScale(10)" class="btn-glass px-3 py-1.5 rounded-xl text-xs font-black">A+</button>
             </div>
             <div class="flex justify-between text-[0.7rem] text-slate-500 dark:text-slate-400">
               <span>100% 標準</span>
               <span>150% 大字</span>
               <span>200% 特大</span>
+            </div>
+          </div>
+
+          <!-- Tomorrow Schedule Notification Settings -->
+          <div class="p-4 rounded-2xl bg-white/50 dark:bg-slate-900/50 space-y-3">
+            <div class="flex items-center justify-between gap-3">
+              <div>
+                <div class="text-sm font-bold">🔔 隔天排課提醒通知</div>
+                <div class="text-xs text-slate-500 dark:text-slate-400">隔天有排課時自動跳出提醒</div>
+              </div>
+              <button
+                @click="toggleReminderEnabled"
+                class="w-14 h-8 rounded-full p-1 transition-colors duration-300 flex items-center shrink-0"
+                :class="settings.reminderEnabled ? 'theme-bg justify-end' : 'bg-slate-300 dark:bg-slate-700 justify-start'"
+              >
+                <span class="w-6 h-6 rounded-full bg-white shadow-md flex items-center justify-center text-xs">
+                  {{ settings.reminderEnabled ? '✓' : '✕' }}
+                </span>
+              </button>
+            </div>
+
+            <div v-if="settings.reminderEnabled" class="space-y-3 pt-1 border-t border-slate-200/60 dark:border-white/10">
+              <div class="grid grid-cols-2 gap-2.5">
+                <div>
+                  <label class="block text-xs font-bold mb-1">每日通知時間</label>
+                  <input
+                    v-model="settings.reminderTime"
+                    @change="applySettings"
+                    type="time"
+                    class="ios-input w-full px-3 py-2 rounded-xl text-xs font-bold"
+                  />
+                </div>
+                <div>
+                  <label class="block text-xs font-bold mb-1">提醒次數（次/日）</label>
+                  <select
+                    v-model.number="settings.reminderCount"
+                    @change="applySettings"
+                    class="ios-input w-full px-3 py-2 rounded-xl text-xs font-bold"
+                  >
+                    <option :value="1">1 次</option>
+                    <option :value="2">2 次（間隔 30 分）</option>
+                    <option :value="3">3 次（間隔 30 分）</option>
+                    <option :value="4">4 次（間隔 30 分）</option>
+                    <option :value="5">5 次（間隔 30 分）</option>
+                  </select>
+                </div>
+              </div>
+
+              <div class="flex items-center justify-between gap-2 text-xs">
+                <span class="text-slate-500 dark:text-slate-400">
+                  系統推播權限：
+                  <strong :class="notifPermission === 'granted' ? 'text-emerald-500' : 'text-amber-500'">
+                    {{ notifPermissionText }}
+                  </strong>
+                </span>
+                <button
+                  v-if="notifPermission !== 'granted' && notifPermission !== 'unsupported'"
+                  @click="requestNotificationPermission"
+                  type="button"
+                  class="btn-glass px-2.5 py-1 rounded-xl font-bold theme-text"
+                >
+                  授權通知
+                </button>
+              </div>
+
+              <button
+                @click="triggerTestReminder"
+                type="button"
+                class="btn-glass w-full py-2 rounded-xl text-xs font-extrabold theme-text"
+              >
+                🔔 立即測試隔天排課提醒
+              </button>
             </div>
           </div>
 
@@ -732,13 +1092,86 @@
       </div>
     </transition>
 
-    <!-- ==================== MODAL 2: Add / Edit Client ==================== -->
+    <!-- ==================== MODAL 2: Add / Edit Client (+ Renewal Module) ==================== -->
     <transition name="modal-pop">
       <div v-if="showClientModal" @click.self="showClientModal = false" class="fixed inset-0 z-50 bg-slate-950/50 backdrop-blur-sm flex items-center justify-center p-4">
         <div class="modal-box ios-glass-strong rounded-3xl w-full max-w-lg p-6 space-y-4 max-h-[90vh] overflow-y-auto">
           <div class="flex items-center justify-between">
-            <h3 class="text-lg font-black">{{ editingClientId ? '✏️ 編輯學員檔案' : '➕ 新增學員檔案' }}</h3>
+            <h3 class="text-lg font-black">{{ editingClientId ? '✏️ 編輯學員檔案 / 續約' : '➕ 新增學員檔案' }}</h3>
             <button @click="showClientModal = false" class="btn-glass w-8 h-8 rounded-xl text-sm font-bold">✕</button>
+          </div>
+
+          <!-- NEW FEATURE 2: Renewal / Add Sessions Panel (shown when editing existing client) -->
+          <div v-if="editingClientId" class="p-4 rounded-2xl theme-bg-soft border theme-border space-y-3">
+            <div class="flex items-center justify-between">
+              <div class="text-sm font-black theme-text">💳 學員續約 / 新增堂數</div>
+              <span class="text-[0.68rem] font-bold text-slate-600 dark:text-slate-300">
+                目前總堂數：{{ clientForm.purchasedSessions }} 堂
+              </span>
+            </div>
+
+            <div class="flex flex-wrap gap-1.5">
+              <button
+                v-for="preset in [6, 10, 12, 24, 36]"
+                :key="preset"
+                type="button"
+                @click="renewalForm.addSessions = preset"
+                class="px-2.5 py-1 rounded-xl text-xs font-extrabold transition active:scale-95"
+                :class="renewalForm.addSessions === preset ? 'btn-theme' : 'btn-glass'"
+              >
+                +{{ preset }} 堂
+              </button>
+            </div>
+
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+              <div>
+                <label class="block text-xs font-bold mb-1">自填新增購買堂數</label>
+                <input
+                  v-model.number="renewalForm.addSessions"
+                  type="number"
+                  min="1"
+                  placeholder="輸入新增堂數"
+                  class="ios-input w-full px-3 py-2 rounded-xl text-xs font-bold"
+                />
+              </div>
+              <div>
+                <label class="block text-xs font-bold mb-1">調整新合約到期日</label>
+                <input
+                  v-model="renewalForm.newExpiryDate"
+                  type="date"
+                  class="ios-input w-full px-3 py-2 rounded-xl text-xs font-bold"
+                />
+              </div>
+            </div>
+
+            <div class="flex gap-2">
+              <input
+                v-model.trim="renewalForm.note"
+                type="text"
+                placeholder="續約備註（選填，例：2026續約方案）"
+                class="ios-input flex-1 px-3 py-2 rounded-xl text-xs"
+              />
+              <button
+                type="button"
+                @click="applyRenewal"
+                class="btn-theme px-4 py-2 rounded-xl text-xs font-extrabold shrink-0"
+              >
+                確認續約
+              </button>
+            </div>
+
+            <!-- Renewal History -->
+            <div v-if="clientForm.renewalHistory && clientForm.renewalHistory.length > 0" class="pt-2 border-t border-white/40 dark:border-white/10 space-y-1">
+              <div class="text-[0.68rem] font-extrabold text-slate-600 dark:text-slate-300">歷史續約紀錄：</div>
+              <div
+                v-for="(rh, rIdx) in clientForm.renewalHistory"
+                :key="rIdx"
+                class="text-[0.7rem] flex flex-wrap justify-between gap-1 bg-white/50 dark:bg-slate-900/40 px-2.5 py-1 rounded-lg"
+              >
+                <span class="font-bold">{{ rh.date }} · <strong class="theme-text">+{{ rh.addedSessions }} 堂</strong></span>
+                <span class="text-slate-500 dark:text-slate-400">到期：{{ rh.newExpiryDate || '未設' }} {{ rh.note ? '(' + rh.note + ')' : '' }}</span>
+              </div>
+            </div>
           </div>
 
           <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -1035,7 +1468,150 @@
       </div>
     </transition>
 
-    <!-- ==================== MODAL 4: PDF Export Progress Loader ==================== -->
+    <!-- ==================== MODAL 4: Add / Edit Schedule ==================== -->
+    <transition name="modal-pop">
+      <div v-if="showScheduleModal" @click.self="showScheduleModal = false" class="fixed inset-0 z-50 bg-slate-950/50 backdrop-blur-sm flex items-center justify-center p-4">
+        <div class="modal-box ios-glass-strong rounded-3xl w-full max-w-md p-6 space-y-4 max-h-[90vh] overflow-y-auto">
+          <div class="flex items-center justify-between">
+            <h3 class="text-lg font-black">{{ editingScheduleId ? '✏️ 編輯排課' : '📅 新增排課預約' }}</h3>
+            <button @click="showScheduleModal = false" class="btn-glass w-8 h-8 rounded-xl text-sm font-bold">✕</button>
+          </div>
+
+          <div class="space-y-3">
+            <!-- Client Select or Custom Input -->
+            <div>
+              <label class="block text-xs font-bold mb-1">選擇學員 *</label>
+              <select
+                v-if="clients.length > 0"
+                v-model="scheduleForm.clientId"
+                @change="onScheduleClientChange"
+                class="ios-input w-full px-3.5 py-2.5 rounded-2xl text-sm mb-2"
+              >
+                <option value="">-- 手動輸入臨時 / 體驗學員 --</option>
+                <option v-for="c in clients" :key="c.id" :value="c.id">
+                  {{ c.name }}（剩 {{ getRemainingSessions(c) }} 堂）
+                </option>
+              </select>
+              <input
+                v-model.trim="scheduleForm.clientName"
+                type="text"
+                placeholder="學員姓名（例：王小明）"
+                class="ios-input w-full px-3.5 py-2.5 rounded-2xl text-sm"
+              />
+            </div>
+
+            <!-- Date & Time -->
+            <div class="grid grid-cols-2 gap-3">
+              <div>
+                <label class="block text-xs font-bold mb-1">上課日期 *</label>
+                <input v-model="scheduleForm.date" type="date" class="ios-input w-full px-3 py-2.5 rounded-2xl text-sm" />
+              </div>
+              <div>
+                <label class="block text-xs font-bold mb-1">開始時間 *</label>
+                <input v-model="scheduleForm.startTime" type="time" class="ios-input w-full px-3 py-2.5 rounded-2xl text-sm" />
+              </div>
+            </div>
+
+            <div class="grid grid-cols-2 gap-3">
+              <div>
+                <label class="block text-xs font-bold mb-1">課程時長</label>
+                <select v-model.number="scheduleForm.duration" class="ios-input w-full px-3 py-2.5 rounded-2xl text-sm">
+                  <option :value="50">50 分鐘</option>
+                  <option :value="60">60 分鐘</option>
+                  <option :value="75">75 分鐘</option>
+                  <option :value="90">90 分鐘</option>
+                  <option :value="120">120 分鐘</option>
+                </select>
+              </div>
+              <div>
+                <label class="block text-xs font-bold mb-1">預計訓練主題</label>
+                <input v-model.trim="scheduleForm.topic" type="text" placeholder="例：臀腿訓練" class="ios-input w-full px-3 py-2.5 rounded-2xl text-sm" />
+              </div>
+            </div>
+
+            <div>
+              <label class="block text-xs font-bold mb-1">上課地點（選填）</label>
+              <input v-model.trim="scheduleForm.location" type="text" placeholder="例：私人健身工作室 / 萵苣" class="ios-input w-full px-3.5 py-2.5 rounded-2xl text-sm" />
+            </div>
+
+            <div>
+              <label class="block text-xs font-bold mb-1">備註（選填）</label>
+              <textarea v-model.trim="scheduleForm.notes" rows="2" placeholder="課前準備或提醒事項..." class="ios-input w-full px-3.5 py-2 rounded-2xl text-sm"></textarea>
+            </div>
+          </div>
+
+          <div class="flex gap-2.5 pt-2">
+            <button @click="showScheduleModal = false" class="btn-glass flex-1 py-3 rounded-2xl text-sm font-bold">取消</button>
+            <button @click="saveSchedule" class="btn-theme flex-1 py-3 rounded-2xl text-sm font-extrabold">儲存排課</button>
+          </div>
+        </div>
+      </div>
+    </transition>
+
+    <!-- ==================== MODAL 5: Cross-Platform Sync to System Calendar ==================== -->
+    <transition name="modal-pop">
+      <div v-if="syncModal.show && syncModal.item" @click.self="syncModal.show = false" class="fixed inset-0 z-50 bg-slate-950/50 backdrop-blur-sm flex items-center justify-center p-4">
+        <div class="modal-box ios-glass-strong rounded-3xl w-full max-w-md p-6 space-y-4">
+          <div class="flex items-center justify-between">
+            <h3 class="text-lg font-black">📲 同步至系統行事曆</h3>
+            <button @click="syncModal.show = false" class="btn-glass w-8 h-8 rounded-xl text-sm font-bold">✕</button>
+          </div>
+
+          <div class="p-3.5 rounded-2xl bg-white/55 dark:bg-slate-900/50 space-y-1 text-xs">
+            <div class="text-sm font-black">{{ syncModal.item.clientName }} 私人教練課</div>
+            <div class="font-bold theme-text">
+              📅 {{ syncModal.item.date }} · {{ syncModal.item.startTime }} ~ {{ syncModal.item.endTime }}
+            </div>
+            <div v-if="syncModal.item.topic" class="text-slate-600 dark:text-slate-300">主題：{{ syncModal.item.topic }}</div>
+            <div v-if="syncModal.item.location" class="text-slate-500">地點：{{ syncModal.item.location }}</div>
+          </div>
+
+          <div class="space-y-2.5">
+            <!-- Universal .ics (Works on iOS Apple Calendar, Android, macOS, Windows Outlook) -->
+            <button
+              @click="downloadSingleICS(syncModal.item)"
+              class="btn-theme w-full py-3.5 px-4 rounded-2xl text-left flex items-center justify-between gap-3"
+            >
+              <div>
+                <div class="text-sm font-black">📱 匯入系統原生行事曆（全系統通用）</div>
+                <div class="text-[0.7rem] opacity-90">適用 iPhone (Apple) / Android / Mac / Windows（含30分前提醒）</div>
+              </div>
+              <span class="text-lg">➔</span>
+            </button>
+
+            <!-- Google Calendar Direct Deep Link -->
+            <a
+              :href="buildGoogleCalendarUrl(syncModal.item)"
+              target="_blank"
+              rel="noopener noreferrer"
+              class="btn-glass w-full py-3 px-4 rounded-2xl text-left flex items-center justify-between gap-3 block"
+            >
+              <div>
+                <div class="text-sm font-extrabold">🗓️ 直接開啟 Google 行事曆</div>
+                <div class="text-[0.7rem] text-slate-500 dark:text-slate-400">一鍵跳轉並自動預填日期、時間與備註</div>
+              </div>
+              <span class="text-base">↗</span>
+            </a>
+
+            <!-- Outlook Calendar Direct Deep Link -->
+            <a
+              :href="buildOutlookCalendarUrl(syncModal.item)"
+              target="_blank"
+              rel="noopener noreferrer"
+              class="btn-glass w-full py-3 px-4 rounded-2xl text-left flex items-center justify-between gap-3 block"
+            >
+              <div>
+                <div class="text-sm font-extrabold">📧 直接開啟 Outlook 行事曆</div>
+                <div class="text-[0.7rem] text-slate-500 dark:text-slate-400">適用 Microsoft 365 / Outlook 帳號</div>
+              </div>
+              <span class="text-base">↗</span>
+            </a>
+          </div>
+        </div>
+      </div>
+    </transition>
+
+    <!-- ==================== MODAL 6: PDF Export Progress Loader ==================== -->
     <transition name="modal-pop">
       <div v-if="pdfExport.active" class="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-md flex items-center justify-center p-4">
         <div class="modal-box ios-glass-strong rounded-3xl w-full max-w-sm p-6 text-center space-y-4">
@@ -1072,7 +1648,7 @@
       </div>
     </transition>
 
-    <!-- ==================== MODAL 5: Equipment Lightbox ==================== -->
+    <!-- ==================== MODAL 7: Equipment Lightbox ==================== -->
     <transition name="modal-pop">
       <div v-if="lightbox.show" @click="lightbox.show = false" class="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
         <div class="modal-box max-w-lg w-full text-center space-y-3" @click.stop>
@@ -1087,7 +1663,23 @@
   </div>
 
   <script>
-    const { createApp, ref, computed, onMounted, watch } = Vue;
+    const { createApp, ref, computed, onMounted, onUnmounted } = Vue;
+
+    // Helper: Format local Date to YYYY-MM-DD (avoids UTC timezone shift bug)
+    function toLocalDateStr(d) {
+      const y = d.getFullYear();
+      const m = String(d.getMonth() + 1).padStart(2, '0');
+      const day = String(d.getDate()).padStart(2, '0');
+      return `${y}-${m}-${day}`;
+    }
+
+    function addMinutesToTime(timeStr, minutes) {
+      const [h, m] = (timeStr || '10:00').split(':').map(Number);
+      const total = h * 60 + m + (Number(minutes) || 60);
+      const nh = Math.floor((total % 1440) / 60);
+      const nm = total % 60;
+      return `${String(nh).padStart(2, '0')}:${String(nm).padStart(2, '0')}`;
+    }
 
     // Helper: Build crisp SVG Data URI icons for built-in gym equipment library
     function makeEquipSvg(label, accent, symbolPath) {
@@ -1135,17 +1727,24 @@
 
     const STORAGE_KEY_CLIENTS = 'procoach_clients_v3';
     const STORAGE_KEY_SETTINGS = 'procoach_settings_v3';
+    const STORAGE_KEY_SCHEDULES = 'procoach_schedules_v1';
+    const STORAGE_KEY_REMINDER_STATE = 'procoach_reminder_state_v1';
 
     createApp({
       setup() {
+        const currentTab = ref('clients'); // 'clients' | 'schedule'
         const clients = ref([]);
+        const schedules = ref([]);
         const selectedClientId = ref(null);
         const expandedLogIds = ref([]);
 
         const settings = ref({
           darkMode: false,
           themeId: 'emerald',
-          fontScale: 100
+          fontScale: 100,
+          reminderEnabled: true,
+          reminderTime: '20:00',
+          reminderCount: 2
         });
 
         const showSettingsModal = ref(false);
@@ -1155,7 +1754,23 @@
         const showLogModal = ref(false);
         const editingLogId = ref(null);
 
+        const showScheduleModal = ref(false);
+        const editingScheduleId = ref(null);
+        const syncModal = ref({ show: false, item: null });
+
         const lightbox = ref({ show: false, src: '', title: '' });
+
+        // Notification / Reminder state
+        const notifPermission = ref('Notification' in window ? Notification.permission : 'unsupported');
+        const reminderBanner = ref({ show: false, title: '', body: '', countTag: '' });
+        let reminderIntervalId = null;
+
+        // Calendar navigation state
+        const nowInit = new Date();
+        const todayDateStr = ref(toLocalDateStr(nowInit));
+        const tomorrowDateStr = ref(toLocalDateStr(new Date(nowInit.getFullYear(), nowInit.getMonth(), nowInit.getDate() + 1)));
+        const calViewDate = ref(new Date(nowInit.getFullYear(), nowInit.getMonth(), 1));
+        const selectedCalDate = ref(todayDateStr.value);
 
         const pdfExport = ref({
           active: false,
@@ -1172,7 +1787,9 @@
         });
 
         const clientForm = ref(createEmptyClientForm());
+        const renewalForm = ref({ addSessions: 12, newExpiryDate: '', note: '' });
         const logForm = ref(createEmptyLogForm());
+        const scheduleForm = ref(createEmptyScheduleForm());
 
         function createEmptyClientForm() {
           return {
@@ -1189,7 +1806,8 @@
             muscleMass: '',
             bodyFat: '',
             waist: '',
-            hip: ''
+            hip: '',
+            renewalHistory: []
           };
         }
 
@@ -1208,9 +1826,8 @@
         }
 
         function createEmptyLogForm() {
-          const today = new Date().toISOString().slice(0, 10);
           return {
-            date: today,
+            date: toLocalDateStr(new Date()),
             bodyPart: '',
             condition: '飲食與睡眠正常',
             exercises: [createEmptyExercise()],
@@ -1219,8 +1836,82 @@
           };
         }
 
+        function createEmptyScheduleForm(defaultDate = null) {
+          return {
+            clientId: '',
+            clientName: '',
+            date: defaultDate || selectedCalDate.value || toLocalDateStr(new Date()),
+            startTime: '14:00',
+            duration: 60,
+            topic: '',
+            location: '',
+            notes: ''
+          };
+        }
+
         const activeClient = computed(() => {
           return clients.value.find(c => c.id === selectedClientId.value) || null;
+        });
+
+        const notifPermissionText = computed(() => {
+          if (notifPermission.value === 'granted') return '已授權推播';
+          if (notifPermission.value === 'denied') return '已被封鎖（將改用站內提醒）';
+          if (notifPermission.value === 'unsupported') return '瀏覽器不支援（將用站內提醒）';
+          return '尚未授權';
+        });
+
+        // Calendar computed properties
+        const calYear = computed(() => calViewDate.value.getFullYear());
+        const calMonth = computed(() => calViewDate.value.getMonth());
+
+        const scheduleCountByDate = computed(() => {
+          const map = {};
+          schedules.value.forEach(s => {
+            if (!s.date) return;
+            map[s.date] = (map[s.date] || 0) + 1;
+          });
+          return map;
+        });
+
+        const calendarCells = computed(() => {
+          const y = calYear.value;
+          const m = calMonth.value;
+          const firstDayOfWeek = new Date(y, m, 1).getDay();
+          const daysInMonth = new Date(y, m + 1, 0).getDate();
+          const cells = [];
+
+          for (let i = 0; i < firstDayOfWeek; i++) {
+            cells.push({ key: `blank_${i}`, day: '', dateStr: '', count: 0 });
+          }
+          for (let d = 1; d <= daysInMonth; d++) {
+            const ds = `${y}-${String(m + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+            cells.push({
+              key: ds,
+              day: d,
+              dateStr: ds,
+              count: scheduleCountByDate.value[ds] || 0
+            });
+          }
+          return cells;
+        });
+
+        const selectedDateSchedules = computed(() => {
+          return schedules.value
+            .filter(s => s.date === selectedCalDate.value)
+            .sort((a, b) => (a.startTime || '').localeCompare(b.startTime || ''));
+        });
+
+        const tomorrowSchedules = computed(() => {
+          return schedules.value
+            .filter(s => s.date === tomorrowDateStr.value)
+            .sort((a, b) => (a.startTime || '').localeCompare(b.startTime || ''));
+        });
+
+        const currentMonthSchedules = computed(() => {
+          const prefix = `${calYear.value}-${String(calMonth.value + 1).padStart(2, '0')}`;
+          return schedules.value
+            .filter(s => (s.date || '').startsWith(prefix))
+            .sort((a, b) => `${a.date} ${a.startTime}`.localeCompare(`${b.date} ${b.startTime}`));
         });
 
         // Persistence
@@ -1229,12 +1920,20 @@
             const rawClients = localStorage.getItem(STORAGE_KEY_CLIENTS);
             if (rawClients) {
               const parsed = JSON.parse(rawClients);
-              if (Array.isArray(parsed)) {
-                clients.value = parsed;
-              }
+              if (Array.isArray(parsed)) clients.value = parsed;
             }
           } catch (e) {
             clients.value = [];
+          }
+
+          try {
+            const rawSchedules = localStorage.getItem(STORAGE_KEY_SCHEDULES);
+            if (rawSchedules) {
+              const parsed = JSON.parse(rawSchedules);
+              if (Array.isArray(parsed)) schedules.value = parsed;
+            }
+          } catch (e) {
+            schedules.value = [];
           }
 
           try {
@@ -1261,13 +1960,16 @@
           }
         }
 
+        function saveSchedulesToStorage() {
+          try {
+            localStorage.setItem(STORAGE_KEY_SCHEDULES, JSON.stringify(schedules.value));
+          } catch (e) {}
+        }
+
         function applySettings() {
           const html = document.documentElement;
-          if (settings.value.darkMode) {
-            html.classList.add('dark');
-          } else {
-            html.classList.remove('dark');
-          }
+          if (settings.value.darkMode) html.classList.add('dark');
+          else html.classList.remove('dark');
 
           const t = THEMES.find(item => item.id === settings.value.themeId) || THEMES[0];
           html.style.setProperty('--theme-primary', t.primary);
@@ -1290,6 +1992,14 @@
           applySettings();
         }
 
+        function toggleReminderEnabled() {
+          settings.value.reminderEnabled = !settings.value.reminderEnabled;
+          applySettings();
+          if (settings.value.reminderEnabled) {
+            requestNotificationPermission();
+          }
+        }
+
         function setTheme(id) {
           settings.value.themeId = id;
           applySettings();
@@ -1300,7 +2010,7 @@
           applySettings();
         }
 
-        // Client helpers
+        // ==================== Client & Renewal Helpers ====================
         function selectClient(id) {
           selectedClientId.value = id;
           const c = clients.value.find(item => item.id === id);
@@ -1344,7 +2054,13 @@
               muscleMass: client.muscleMass || '',
               bodyFat: client.bodyFat || '',
               waist: client.waist || '',
-              hip: client.hip || ''
+              hip: client.hip || '',
+              renewalHistory: Array.isArray(client.renewalHistory) ? JSON.parse(JSON.stringify(client.renewalHistory)) : []
+            };
+            renewalForm.value = {
+              addSessions: 12,
+              newExpiryDate: client.expiryDate || '',
+              note: ''
             };
           } else {
             editingClientId.value = null;
@@ -1353,13 +2069,33 @@
           showClientModal.value = true;
         }
 
+        function applyRenewal() {
+          const added = Number(renewalForm.value.addSessions) || 0;
+          if (added <= 0) {
+            alert('請輸入大於 0 的續約新增堂數');
+            return;
+          }
+          clientForm.value.purchasedSessions = (Number(clientForm.value.purchasedSessions) || 0) + added;
+          if (renewalForm.value.newExpiryDate) {
+            clientForm.value.expiryDate = renewalForm.value.newExpiryDate;
+          }
+          if (!Array.isArray(clientForm.value.renewalHistory)) {
+            clientForm.value.renewalHistory = [];
+          }
+          clientForm.value.renewalHistory.unshift({
+            date: toLocalDateStr(new Date()),
+            addedSessions: added,
+            newExpiryDate: clientForm.value.expiryDate,
+            note: renewalForm.value.note || ''
+          });
+          renewalForm.value.note = '';
+          alert(`✅ 已成功累加 +${added} 堂！目前購買總堂數為 ${clientForm.value.purchasedSessions} 堂，記得點擊下方「儲存學員檔案」保存變更。`);
+        }
+
         function toggleGoal(goal) {
           const idx = clientForm.value.goals.indexOf(goal);
-          if (idx === -1) {
-            clientForm.value.goals.push(goal);
-          } else {
-            clientForm.value.goals.splice(idx, 1);
-          }
+          if (idx === -1) clientForm.value.goals.push(goal);
+          else clientForm.value.goals.splice(idx, 1);
         }
 
         function saveClient() {
@@ -1372,7 +2108,8 @@
             if (target) {
               Object.assign(target, {
                 ...clientForm.value,
-                goals: [...clientForm.value.goals]
+                goals: [...clientForm.value.goals],
+                renewalHistory: Array.isArray(clientForm.value.renewalHistory) ? [...clientForm.value.renewalHistory] : []
               });
             }
           } else {
@@ -1380,6 +2117,7 @@
               id: 'cli_' + Date.now(),
               ...clientForm.value,
               goals: [...clientForm.value.goals],
+              renewalHistory: [],
               logs: []
             };
             clients.value.unshift(newClient);
@@ -1398,14 +2136,11 @@
           saveClientsToStorage();
         }
 
-        // Training Log helpers
+        // ==================== Training Log Helpers ====================
         function toggleLogExpand(logId) {
           const idx = expandedLogIds.value.indexOf(logId);
-          if (idx === -1) {
-            expandedLogIds.value.push(logId);
-          } else {
-            expandedLogIds.value.splice(idx, 1);
-          }
+          if (idx === -1) expandedLogIds.value.push(logId);
+          else expandedLogIds.value.splice(idx, 1);
         }
 
         function getEquipmentPreview(ex) {
@@ -1418,9 +2153,7 @@
           ex.equipmentId = eq.id;
           ex.equipmentType = eq.name;
           ex.customPhoto = '';
-          if (!ex.name) {
-            ex.name = eq.name;
-          }
+          if (!ex.name) ex.name = eq.name;
         }
 
         function handleEquipmentPhoto(event, ex) {
@@ -1546,6 +2279,297 @@
           saveClientsToStorage();
         }
 
+        // ==================== Schedule & Cross-Platform Calendar Sync ====================
+        function changeCalMonth(delta) {
+          calViewDate.value = new Date(calYear.value, calMonth.value + delta, 1);
+        }
+
+        function jumpToToday() {
+          const now = new Date();
+          todayDateStr.value = toLocalDateStr(now);
+          calViewDate.value = new Date(now.getFullYear(), now.getMonth(), 1);
+          selectedCalDate.value = todayDateStr.value;
+        }
+
+        function selectCalendarDate(dateStr) {
+          selectedCalDate.value = dateStr;
+          const [y, m] = dateStr.split('-').map(Number);
+          if (y && m) {
+            calViewDate.value = new Date(y, m - 1, 1);
+          }
+        }
+
+        function openScheduleModal(item = null, defaultDate = null) {
+          if (item) {
+            editingScheduleId.value = item.id;
+            scheduleForm.value = {
+              clientId: item.clientId || '',
+              clientName: item.clientName || '',
+              date: item.date || selectedCalDate.value,
+              startTime: item.startTime || '14:00',
+              duration: Number(item.duration) || 60,
+              topic: item.topic || '',
+              location: item.location || '',
+              notes: item.notes || ''
+            };
+          } else {
+            editingScheduleId.value = null;
+            scheduleForm.value = createEmptyScheduleForm(defaultDate);
+            if (clients.value.length > 0 && activeClient.value) {
+              scheduleForm.value.clientId = activeClient.value.id;
+              scheduleForm.value.clientName = activeClient.value.name;
+            }
+          }
+          showScheduleModal.value = true;
+        }
+
+        function onScheduleClientChange() {
+          const found = clients.value.find(c => c.id === scheduleForm.value.clientId);
+          if (found) {
+            scheduleForm.value.clientName = found.name;
+          }
+        }
+
+        function saveSchedule() {
+          if (!scheduleForm.value.clientName) {
+            alert('請選擇或填寫學員姓名');
+            return;
+          }
+          if (!scheduleForm.value.date || !scheduleForm.value.startTime) {
+            alert('請選擇上課日期與時間');
+            return;
+          }
+
+          const endTime = addMinutesToTime(scheduleForm.value.startTime, scheduleForm.value.duration);
+          const payload = {
+            ...scheduleForm.value,
+            endTime
+          };
+
+          if (editingScheduleId.value) {
+            const idx = schedules.value.findIndex(s => s.id === editingScheduleId.value);
+            if (idx !== -1) {
+              schedules.value[idx] = { ...schedules.value[idx], ...payload };
+            }
+          } else {
+            schedules.value.push({
+              id: 'sch_' + Date.now(),
+              ...payload
+            });
+          }
+
+          saveSchedulesToStorage();
+          selectCalendarDate(payload.date);
+          showScheduleModal.value = false;
+        }
+
+        function deleteSchedule(id) {
+          if (!confirm('確定要刪除此筆排課嗎？')) return;
+          schedules.value = schedules.value.filter(s => s.id !== id);
+          saveSchedulesToStorage();
+        }
+
+        function openSyncModal(item) {
+          syncModal.value = { show: true, item };
+        }
+
+        function escapeICS(str) {
+          return String(str || '')
+            .replace(/\\/g, '\\\\')
+            .replace(/;/g, '\\;')
+            .replace(/,/g, '\\,')
+            .replace(/\n/g, '\\n');
+        }
+
+        function toICSDateTimeLocal(dateStr, timeStr) {
+          // YYYYMMDDTHHMMSS (Floating local time - works accurately across iOS/Android/Windows/macOS)
+          return dateStr.replace(/-/g, '') + 'T' + timeStr.replace(/:/g, '') + '00';
+        }
+
+        function toICSDateTimeUTC(dateStr, timeStr) {
+          const [y, m, d] = dateStr.split('-').map(Number);
+          const [hh, mm] = timeStr.split(':').map(Number);
+          const dt = new Date(y, m - 1, d, hh, mm, 0);
+          return dt.toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
+        }
+
+        function buildICSEventBlock(item) {
+          const dtStamp = new Date().toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
+          const dtStart = toICSDateTimeUTC(item.date, item.startTime);
+          const dtEnd = toICSDateTimeUTC(item.date, item.endTime || addMinutesToTime(item.startTime, item.duration));
+          const summary = `【教練課】${item.clientName}${item.topic ? ' - ' + item.topic : ''}`;
+          const desc = [
+            `學員：${item.clientName}`,
+            item.topic ? `訓練主題：${item.topic}` : '',
+            item.notes ? `備註：${item.notes}` : '',
+            '由 ProCoach 私人教練系統匯出'
+          ].filter(Boolean).join('\\n');
+
+          return [
+            'BEGIN:VEVENT',
+            `UID:${item.id}@procoach.app`,
+            `DTSTAMP:${dtStamp}`,
+            `DTSTART:${dtStart}`,
+            `DTEND:${dtEnd}`,
+            `SUMMARY:${escapeICS(summary)}`,
+            `DESCRIPTION:${desc}`,
+            item.location ? `LOCATION:${escapeICS(item.location)}` : '',
+            'BEGIN:VALARM',
+            'TRIGGER:-PT30M',
+            'ACTION:DISPLAY',
+            `DESCRIPTION:30 分鐘後有 ${escapeICS(item.clientName)} 的私人教練課`,
+            'END:VALARM',
+            'END:VEVENT'
+          ].filter(Boolean).join('\r\n');
+        }
+
+        function triggerICSDownload(eventsArray, filename) {
+          const icsContent = [
+            'BEGIN:VCALENDAR',
+            'VERSION:2.0',
+            'PRODID:-//ProCoach//Personal Trainer Schedule//ZH',
+            'CALSCALE:GREGORIAN',
+            'METHOD:PUBLISH',
+            ...eventsArray.map(buildICSEventBlock),
+            'END:VCALENDAR'
+          ].join('\r\n');
+
+          const blob = new Blob([icsContent], { type: 'text/calendar;charset=utf-8' });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = filename;
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          setTimeout(() => URL.revokeObjectURL(url), 1500);
+        }
+
+        function downloadSingleICS(item) {
+          const safeName = (item.clientName || '學員').replace(/[\\/:*?"<>|]/g, '_');
+          triggerICSDownload([item], `ProCoach_${safeName}_${item.date}.ics`);
+          syncModal.value.show = false;
+        }
+
+        function exportMonthICS() {
+          if (currentMonthSchedules.value.length === 0) return;
+          const ym = `${calYear.value}-${String(calMonth.value + 1).padStart(2, '0')}`;
+          triggerICSDownload(currentMonthSchedules.value, `ProCoach_${ym}_排課表.ics`);
+        }
+
+        function buildGoogleCalendarUrl(item) {
+          const dtStart = toICSDateTimeUTC(item.date, item.startTime);
+          const dtEnd = toICSDateTimeUTC(item.date, item.endTime || addMinutesToTime(item.startTime, item.duration));
+          const text = encodeURIComponent(`【教練課】${item.clientName}${item.topic ? ' - ' + item.topic : ''}`);
+          const details = encodeURIComponent(`學員：${item.clientName}\n${item.topic ? '主題：' + item.topic + '\n' : ''}${item.notes ? '備註：' + item.notes : ''}`);
+          const location = encodeURIComponent(item.location || '');
+          return `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${text}&dates=${dtStart}/${dtEnd}&details=${details}&location=${location}`;
+        }
+
+        function buildOutlookCalendarUrl(item) {
+          const [y, m, d] = item.date.split('-').map(Number);
+          const [sh, sm] = item.startTime.split(':').map(Number);
+          const endStr = item.endTime || addMinutesToTime(item.startTime, item.duration);
+          const [eh, em] = endStr.split(':').map(Number);
+          const startIso = new Date(y, m - 1, d, sh, sm, 0).toISOString();
+          const endIso = new Date(y, m - 1, d, eh, em, 0).toISOString();
+          const subject = encodeURIComponent(`【教練課】${item.clientName}${item.topic ? ' - ' + item.topic : ''}`);
+          const body = encodeURIComponent(`學員：${item.clientName}\n${item.topic ? '主題：' + item.topic + '\n' : ''}${item.notes || ''}`);
+          const loc = encodeURIComponent(item.location || '');
+          return `https://outlook.live.com/calendar/0/deeplink/compose?subject=${subject}&startdt=${encodeURIComponent(startIso)}&enddt=${encodeURIComponent(endIso)}&body=${body}&location=${loc}`;
+        }
+
+        // ==================== Tomorrow Schedule Notification Engine ====================
+        async function requestNotificationPermission() {
+          if (!('Notification' in window)) {
+            notifPermission.value = 'unsupported';
+            return;
+          }
+          try {
+            const res = await Notification.requestPermission();
+            notifPermission.value = res;
+          } catch (e) {}
+        }
+
+        function fireReminderNotification(list, countIndex, maxCount, isTest = false) {
+          const title = isTest
+            ? '🔔【測試】明日排課提醒'
+            : `🔔 明日（${tomorrowDateStr.value}）共有 ${list.length} 堂排課`;
+          const body = list.length > 0
+            ? list.map(s => `• ${s.startTime} ~ ${s.endTime}｜${s.clientName}${s.topic ? '（' + s.topic + '）' : ''}`).join('\n')
+            : '目前明天尚無排課（測試通知運作正常！）';
+
+          // 1. In-app iOS glass banner
+          reminderBanner.value = {
+            show: true,
+            title,
+            body,
+            countTag: isTest ? '測試推播' : `第 ${countIndex} / ${maxCount} 次提醒`
+          };
+
+          // 2. Native OS / Browser Notification if granted
+          if ('Notification' in window && Notification.permission === 'granted') {
+            try {
+              const n = new Notification(title, {
+                body,
+                tag: 'procoach-tomorrow-reminder'
+              });
+              n.onclick = () => {
+                window.focus();
+                goToTomorrowSchedule();
+              };
+            } catch (e) {}
+          }
+        }
+
+        function checkTomorrowReminders() {
+          const now = new Date();
+          todayDateStr.value = toLocalDateStr(now);
+          tomorrowDateStr.value = toLocalDateStr(new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1));
+
+          if (!settings.value.reminderEnabled) return;
+          const list = tomorrowSchedules.value;
+          if (list.length === 0) return;
+
+          const [targetH, targetM] = (settings.value.reminderTime || '20:00').split(':').map(Number);
+          const nowMins = now.getHours() * 60 + now.getMinutes();
+          const targetMins = targetH * 60 + targetM;
+          if (nowMins < targetMins) return;
+
+          const maxCount = Math.max(1, Number(settings.value.reminderCount) || 1);
+          let state = { date: todayDateStr.value, count: 0, lastAt: 0 };
+          try {
+            const raw = localStorage.getItem(STORAGE_KEY_REMINDER_STATE);
+            if (raw) {
+              const parsed = JSON.parse(raw);
+              if (parsed.date === todayDateStr.value) state = parsed;
+            }
+          } catch (e) {}
+
+          if (state.count >= maxCount) return;
+
+          // First alert fires immediately once time >= reminderTime; subsequent alerts wait 30 minutes
+          const minGapMs = 30 * 60 * 1000;
+          if (state.count === 0 || (Date.now() - state.lastAt) >= minGapMs) {
+            state.count += 1;
+            state.lastAt = Date.now();
+            try {
+              localStorage.setItem(STORAGE_KEY_REMINDER_STATE, JSON.stringify(state));
+            } catch (e) {}
+            fireReminderNotification(list, state.count, maxCount, false);
+          }
+        }
+
+        function triggerTestReminder() {
+          fireReminderNotification(tomorrowSchedules.value, 1, settings.value.reminderCount || 1, true);
+        }
+
+        function goToTomorrowSchedule() {
+          reminderBanner.value.show = false;
+          currentTab.value = 'schedule';
+          selectCalendarDate(tomorrowDateStr.value);
+        }
+
         // ==================== Visual PDF Export (Charts + Full Logs + Progress Loader) ====================
         function sleep(ms) {
           return new Promise(resolve => setTimeout(resolve, ms));
@@ -1577,7 +2601,6 @@
 
           const maxVal = Math.max(100, ...data.map(d => d.val)) * 1.15;
 
-          // Grid lines
           ctx.strokeStyle = '#e2e8f0';
           ctx.lineWidth = 1;
           ctx.fillStyle = '#64748b';
@@ -1593,14 +2616,12 @@
             ctx.fillText(v + ' kg', padL - 8, y + 4);
           }
 
-          // Points
           const pts = data.map((d, i) => {
             const x = data.length === 1 ? padL + plotW / 2 : padL + (plotW * i) / (data.length - 1);
             const y = padT + plotH - (d.val / maxVal) * plotH;
             return { x, y, ...d };
           });
 
-          // Area fill
           if (pts.length > 1) {
             ctx.beginPath();
             ctx.moveTo(pts[0].x, padT + plotH);
@@ -1611,7 +2632,6 @@
             ctx.fill();
           }
 
-          // Line
           ctx.beginPath();
           ctx.strokeStyle = themeColor;
           ctx.lineWidth = 3;
@@ -1621,7 +2641,6 @@
           });
           ctx.stroke();
 
-          // Dots & Labels
           pts.forEach(p => {
             ctx.beginPath();
             ctx.arc(p.x, p.y, 5, 0, Math.PI * 2);
@@ -1715,7 +2734,6 @@
           const activeTheme = THEMES.find(t => t.id === settings.value.themeId) || THEMES[0];
           const logsAsc = [...(client.logs || [])].reverse();
 
-          // Step 2: Render Charts
           pdfExport.value.stepIndex = 1;
           pdfExport.value.percent = 45;
           pdfExport.value.stageText = '正在繪製訓練量與訓練部位趨勢圖表...';
@@ -1733,7 +2751,6 @@
           drawBodyPartBarChart(partCanvas, logsAsc, activeTheme.primary);
           const partChartImg = partCanvas.toDataURL('image/png');
 
-          // Step 3: Build off-screen clean A4 HTML report
           pdfExport.value.stepIndex = 2;
           pdfExport.value.percent = 72;
           pdfExport.value.stageText = '正在排版高解析度視覺化報告頁面...';
@@ -1890,10 +2907,18 @@
 
         onMounted(() => {
           loadAll();
+          checkTomorrowReminders();
+          reminderIntervalId = setInterval(checkTomorrowReminders, 30000);
+        });
+
+        onUnmounted(() => {
+          if (reminderIntervalId) clearInterval(reminderIntervalId);
         });
 
         return {
+          currentTab,
           clients,
+          schedules,
           selectedClientId,
           activeClient,
           expandedLogIds,
@@ -1905,17 +2930,35 @@
           showClientModal,
           editingClientId,
           clientForm,
+          renewalForm,
           showLogModal,
           editingLogId,
           logForm,
+          showScheduleModal,
+          editingScheduleId,
+          scheduleForm,
+          syncModal,
           lightbox,
           pdfExport,
+          notifPermission,
+          notifPermissionText,
+          reminderBanner,
+          todayDateStr,
+          tomorrowDateStr,
+          calYear,
+          calMonth,
+          selectedCalDate,
+          calendarCells,
+          selectedDateSchedules,
+          tomorrowSchedules,
+          currentMonthSchedules,
           selectClient,
           getRemainingSessions,
           getSessionPercent,
           hasBodyMetrics,
           adjustUsedSessions,
           openClientModal,
+          applyRenewal,
           toggleGoal,
           saveClient,
           deleteClient,
@@ -1933,10 +2976,26 @@
           calcLogVolume,
           saveLog,
           deleteLog,
+          changeCalMonth,
+          jumpToToday,
+          selectCalendarDate,
+          openScheduleModal,
+          onScheduleClientChange,
+          saveSchedule,
+          deleteSchedule,
+          openSyncModal,
+          downloadSingleICS,
+          exportMonthICS,
+          buildGoogleCalendarUrl,
+          buildOutlookCalendarUrl,
           toggleDarkMode,
+          toggleReminderEnabled,
           setTheme,
           adjustFontScale,
           applySettings,
+          requestNotificationPermission,
+          triggerTestReminder,
+          goToTomorrowSchedule,
           exportClientPDF
         };
       }
