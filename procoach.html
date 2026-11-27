@@ -1,0 +1,1464 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=2.0">
+  <title>ProCoach 私人教練學員訓練紀錄系統</title>
+  <!-- 載入 Tailwind CSS（預設全站採用 rem 相對單位，隨根字體 100%~200% 同步等比縮放） -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- 載入 Vue 3 處理響應式狀態與資料綁定 -->
+  <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+  <!-- 載入 Google Fonts Inter & Noto Sans TC 提升閱讀質感 -->
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;900&family=Noto+Sans+TC:wght@400;500;700;900&display=swap" rel="stylesheet">
+  <style>
+    /* 基礎根字體大小預設為 16px (100%)，透過 JS 動態調整 100% ~ 200% */
+    html {
+      font-size: 16px;
+      scroll-behavior: smooth;
+    }
+    body {
+      font-family: 'Inter', 'Noto Sans TC', sans-serif;
+      -webkit-tap-highlight-color: transparent;
+    }
+    [v-cloak] { display: none; }
+    /* 隱藏橫向捲軸但保留滑動功能（手機版學員膠囊列專用） */
+    .no-scrollbar::-webkit-scrollbar { display: none; }
+    .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+  </style>
+</head>
+<body class="bg-slate-50 text-slate-800 min-h-screen antialiased selection:bg-indigo-600 selection:text-white">
+
+<div id="app" v-cloak class="min-h-screen flex flex-col pb-12">
+
+  <!-- ==================== 1. 頂部導航列（含字體大小調整器 100%~200%） ==================== -->
+  <header class="bg-white/95 backdrop-blur-md border-b border-slate-200 sticky top-0 z-40 shadow-sm">
+    <div class="max-w-6xl mx-auto px-4 py-3 flex flex-wrap items-center justify-between gap-3">
+      
+      <!-- 品牌 Logo -->
+      <div class="flex items-center gap-2.5">
+        <div class="w-9 h-9 rounded-xl bg-gradient-to-br from-indigo-600 to-blue-700 flex items-center justify-center text-white font-black text-lg shadow-sm shrink-0">
+          P
+        </div>
+        <div>
+          <h1 class="text-base sm:text-lg font-black text-slate-900 tracking-tight leading-tight">ProCoach 訓練日誌</h1>
+          <p class="text-xs text-slate-500 font-medium">私人教練學員數據與課務管理</p>
+        </div>
+      </div>
+
+      <!-- 右側工具群：字體縮放控制器 + 搜尋 + 新增學員 -->
+      <div class="flex flex-wrap items-center gap-2 justify-end flex-1 sm:flex-initial">
+        
+        <!-- 字體大小調整控制器 (100% ~ 200%) -->
+        <div class="flex items-center gap-1.5 bg-slate-100 border border-slate-200 rounded-xl px-2.5 py-1" title="調整全站介面字體大小 (100% ~ 200%)">
+          <button 
+            @click="changeFontScale(-10)" 
+            :disabled="fontScale <= 100"
+            class="px-1.5 py-0.5 rounded-lg bg-white border border-slate-200 text-xs font-black text-slate-700 hover:bg-indigo-50 disabled:opacity-40 transition">
+            A-
+          </button>
+          <input 
+            type="range" 
+            min="100" 
+            max="200" 
+            step="10" 
+            v-model.number="fontScale"
+            @input="applyFontScale"
+            aria-label="字體大小百分比"
+            class="w-16 sm:w-20 accent-indigo-600 cursor-pointer">
+          <button 
+            @click="changeFontScale(10)" 
+            :disabled="fontScale >= 200"
+            class="px-1.5 py-0.5 rounded-lg bg-white border border-slate-200 text-xs font-black text-slate-700 hover:bg-indigo-50 disabled:opacity-40 transition">
+            A+
+          </button>
+          <span class="text-xs font-mono font-bold text-indigo-700 min-w-[3.2rem] text-right">{{ fontScale }}%</span>
+        </div>
+
+        <!-- 搜尋學員框 -->
+        <div class="relative flex-1 sm:w-44 min-w-[8rem] max-w-[14rem]">
+          <input 
+            v-model="searchQuery" 
+            type="text" 
+            placeholder="搜尋學員..." 
+            class="w-full bg-slate-100 border border-slate-200 rounded-xl pl-8 pr-3 py-1.5 text-xs sm:text-sm text-slate-800 focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 transition">
+          <span class="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 text-xs">🔍</span>
+        </div>
+
+        <!-- 新增學員按鈕 -->
+        <button 
+          @click="openStudentModal()" 
+          class="px-3.5 py-2 bg-indigo-600 hover:bg-indigo-700 active:scale-95 text-white text-xs sm:text-sm font-bold rounded-xl shadow-sm transition flex items-center gap-1 whitespace-nowrap">
+          <span>+</span><span>新增學員</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- 手機版：頂部橫向學員快速切換膠囊列（僅在有學員時顯示） -->
+    <div v-if="filteredStudents.length > 0" class="lg:hidden border-t border-slate-100 bg-slate-50/80 px-4 py-2 overflow-x-auto no-scrollbar flex items-center gap-2">
+      <span class="text-xs font-bold text-slate-400 whitespace-nowrap">學員切換：</span>
+      <button 
+        v-for="stu in filteredStudents" 
+        :key="stu.id"
+        @click="selectStudent(stu.id)"
+        :class="selectedStudentId === stu.id ? 'bg-indigo-600 text-white font-bold shadow-sm' : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-100'"
+        class="px-3 py-1.5 rounded-full text-xs transition whitespace-nowrap flex items-center gap-1.5">
+        <span>{{ stu.name }}</span>
+        <span 
+          :class="getRemainingSessions(stu) <= 3 ? 'bg-rose-500 text-white' : (selectedStudentId === stu.id ? 'bg-indigo-500 text-indigo-100' : 'bg-slate-100 text-slate-500')"
+          class="px-1.5 py-0.5 rounded-full text-xs font-mono">
+          餘{{ getRemainingSessions(stu) }}
+        </span>
+      </button>
+    </div>
+  </header>
+
+  <!-- ==================== 主內容區：雙欄自適應佈局 ==================== -->
+  <main class="max-w-6xl mx-auto w-full px-4 pt-5 flex-1 grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+
+    <!-- 電腦版左側邊欄：獨立學員名冊 (3 欄) -->
+    <aside class="hidden lg:block lg:col-span-3 bg-white rounded-2xl border border-slate-200 shadow-sm p-4 sticky top-20 space-y-3">
+      <div class="flex items-center justify-between border-b border-slate-100 pb-2.5">
+        <h2 class="text-xs font-black text-slate-500 uppercase tracking-wider">學員名冊 ({{ filteredStudents.length }})</h2>
+        <button v-if="students.length > 0" @click="clearAllData" class="text-xs text-slate-400 hover:text-rose-600 underline" title="清空所有本機資料">清空全部</button>
+      </div>
+      
+      <div v-if="filteredStudents.length === 0" class="text-center py-8 text-xs text-slate-400 leading-relaxed">
+        目前尚無學員資料<br>請點擊右上角「+ 新增學員」
+      </div>
+
+      <div class="space-y-1.5 max-h-[calc(100vh-12rem)] overflow-y-auto pr-1">
+        <button 
+          v-for="stu in filteredStudents" 
+          :key="stu.id"
+          @click="selectStudent(stu.id)"
+          :class="selectedStudentId === stu.id ? 'bg-indigo-50 border-indigo-300 ring-1 ring-indigo-300' : 'bg-white border-transparent hover:bg-slate-50'"
+          class="w-full text-left p-3 rounded-xl border transition flex items-center justify-between gap-2 group">
+          <div class="min-w-0 flex-1">
+            <div class="font-bold text-sm truncate" :class="selectedStudentId === stu.id ? 'text-indigo-900' : 'text-slate-800'">
+              {{ stu.name }}
+            </div>
+            <div class="text-xs text-slate-500 mt-0.5 truncate">
+              {{ formatDisplayGoals(stu).join(' · ') || '一般體適能' }}
+            </div>
+          </div>
+          <div class="text-right shrink-0">
+            <span 
+              :class="getRemainingSessions(stu) <= 3 ? 'bg-rose-100 text-rose-700 border-rose-200 font-bold' : 'bg-slate-100 text-slate-600 border-slate-200'"
+              class="px-2 py-0.5 rounded-lg border text-xs font-mono">
+              剩 {{ getRemainingSessions(stu) }} 堂
+            </span>
+          </div>
+        </button>
+      </div>
+    </aside>
+
+    <!-- 右側主空間：單一學員專屬檔案與訓練時間軸 (9 欄) -->
+    <section v-if="currentStudent" class="lg:col-span-9 space-y-6">
+
+      <!-- ==================== 2. 上半部：靜態檔案與合約狀態卡片 ==================== -->
+      <div class="bg-white rounded-2xl border border-slate-200 shadow-sm p-5 sm:p-6 space-y-5">
+        
+        <!-- 學員標題列與基本操作 -->
+        <div class="flex flex-wrap items-start justify-between gap-3 border-b border-slate-100 pb-4">
+          <div class="space-y-2 flex-1 min-w-[14rem]">
+            <div class="flex items-center gap-2.5 flex-wrap">
+              <h2 class="text-xl sm:text-2xl font-black text-slate-900 break-words">{{ currentStudent.name }}</h2>
+              <!-- 主要訴求標籤（包含一般選項與「其他」自訂內容） -->
+              <div class="flex flex-wrap gap-1.5">
+                <span 
+                  v-for="(goalText, gIdx) in formatDisplayGoals(currentStudent)" 
+                  :key="gIdx"
+                  class="px-2.5 py-1 rounded-lg bg-indigo-50 text-indigo-700 border border-indigo-200 text-xs font-bold break-words">
+                  🎯 {{ goalText }}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <div class="flex items-center gap-2 shrink-0">
+            <button @click="openStudentModal(currentStudent)" class="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl transition">
+              ✏️ 編輯檔案
+            </button>
+            <button @click="confirmDeleteStudent(currentStudent)" class="px-2.5 py-1.5 bg-white hover:bg-rose-50 text-slate-400 hover:text-rose-600 border border-slate-200 text-xs rounded-xl transition" title="刪除學員">
+              🗑️
+            </button>
+          </div>
+        </div>
+
+        <!-- 堂數視覺化進度條與低堂數預警 -->
+        <div class="bg-slate-50 rounded-xl p-4 border border-slate-200/80 space-y-2.5">
+          <div class="flex flex-wrap items-center justify-between gap-2">
+            <div class="flex flex-wrap items-center gap-2">
+              <span class="text-xs font-bold text-slate-600">合約堂數進度：</span>
+              <span class="text-sm sm:text-base font-black font-mono text-slate-900">
+                剩餘 <span :class="getRemainingSessions(currentStudent) <= 3 ? 'text-rose-600 text-lg' : 'text-indigo-600 text-lg'">{{ getRemainingSessions(currentStudent) }}</span> / {{ currentStudent.totalSessions }} 堂
+              </span>
+              <span class="text-xs text-slate-400">(已上 {{ currentStudent.usedSessions }} 堂)</span>
+            </div>
+
+            <!-- 快速加購/調整堂數按鈕 -->
+            <div class="flex flex-wrap items-center gap-1.5">
+              <button @click="adjustSessions(10)" class="px-2.5 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 rounded-lg text-xs font-bold transition">
+                + 續約10堂
+              </button>
+              <button @click="openSessionAdjustModal" class="px-2.5 py-1 bg-white hover:bg-slate-100 text-slate-600 border border-slate-200 rounded-lg text-xs font-bold transition">
+                手動微調
+              </button>
+            </div>
+          </div>
+
+          <!-- 進度條本體 -->
+          <div class="w-full h-3 bg-slate-200 rounded-full overflow-hidden">
+            <div 
+              class="h-full transition-all duration-500 rounded-full"
+              :class="getRemainingSessions(currentStudent) <= 3 ? 'bg-rose-500' : 'bg-indigo-600'"
+              :style="{ width: sessionPercentage + '%' }">
+            </div>
+          </div>
+
+          <!-- 低堂數預警提示 -->
+          <div v-if="getRemainingSessions(currentStudent) <= 3" class="flex items-start gap-2 text-xs font-bold text-rose-700 bg-rose-100/80 px-3 py-2 rounded-lg border border-rose-200">
+            <span class="shrink-0">⚠️</span>
+            <span>堂數偏低（僅剩 {{ getRemainingSessions(currentStudent) }} 堂），建議近期與學員溝通下階段課表與續約規劃！</span>
+          </div>
+        </div>
+
+        <!-- 紅旗警示區：傷病史與動作禁忌（點擊可直接快速編輯） -->
+        <div 
+          @click="isEditingInjury = true"
+          class="bg-rose-50/90 hover:bg-rose-50 border-l-4 border-rose-500 rounded-r-xl p-3.5 sm:p-4 cursor-pointer transition group">
+          <div class="flex flex-wrap items-center justify-between gap-2 mb-1">
+            <span class="text-xs font-black text-rose-800 flex items-center gap-1.5">
+              <span>🚨</span> 傷病史與動作禁忌（紅旗警示區）
+            </span>
+            <span class="text-xs text-rose-500 group-hover:underline font-medium">點擊快速修改</span>
+          </div>
+          
+          <div v-if="!isEditingInjury" class="text-xs sm:text-sm text-rose-950 font-medium leading-relaxed break-words">
+            {{ currentStudent.injuries || '目前無特殊傷病史記錄（點擊此處新增注意事項）' }}
+          </div>
+          <div v-else @click.stop class="mt-2 space-y-2">
+            <textarea 
+              v-model="currentStudent.injuries" 
+              rows="2" 
+              placeholder="輸入舊傷、脊椎/關節限制或動作禁忌..."
+              class="w-full bg-white border border-rose-300 rounded-lg p-2 text-xs sm:text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-rose-500">
+            </textarea>
+            <div class="flex justify-end">
+              <button @click="saveInjuryQuickEdit" class="px-3 py-1 bg-rose-600 text-white text-xs font-bold rounded-lg shadow-sm">
+                完成儲存
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- 體態數據基準快覽（可展開/收合） -->
+        <div class="border border-slate-200 rounded-xl overflow-hidden">
+          <button 
+            @click="showBodyMetrics = !showBodyMetrics"
+            class="w-full px-4 py-2.5 bg-slate-50 hover:bg-slate-100 flex flex-wrap items-center justify-between gap-2 text-xs font-bold text-slate-700 transition">
+            <span class="flex items-center gap-1.5 flex-wrap text-left">
+              <span>📊</span> 體態數據基準快覽
+              <span class="font-normal text-slate-500">
+                ({{ currentStudent.metrics.weight || '--' }} kg / 體脂 {{ currentStudent.metrics.bodyFat || '--' }}%)
+              </span>
+            </span>
+            <span class="text-indigo-600 shrink-0">{{ showBodyMetrics ? '收合 ▲' : '展開與更新 ▼' }}</span>
+          </button>
+
+          <div v-if="showBodyMetrics" class="p-4 bg-white grid grid-cols-1 sm:grid-cols-3 gap-3 border-t border-slate-100">
+            <div>
+              <label class="block text-xs text-slate-500 font-bold mb-1">最新體重 (kg)</label>
+              <input v-model.number="currentStudent.metrics.weight" @change="saveToLocal" type="number" step="0.1" class="w-full bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 text-sm font-mono font-bold text-slate-800">
+            </div>
+            <div>
+              <label class="block text-xs text-slate-500 font-bold mb-1">體脂率 (%)</label>
+              <input v-model.number="currentStudent.metrics.bodyFat" @change="saveToLocal" type="number" step="0.1" class="w-full bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 text-sm font-mono font-bold text-slate-800">
+            </div>
+            <div>
+              <label class="block text-xs text-slate-500 font-bold mb-1">骨骼肌重 (kg)</label>
+              <input v-model.number="currentStudent.metrics.muscleMass" @change="saveToLocal" type="number" step="0.1" class="w-full bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 text-sm font-mono font-bold text-slate-800">
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- ==================== 3. 下半部：動態訓練時間軸 ==================== -->
+      <div class="space-y-4">
+        <div class="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h3 class="text-base sm:text-lg font-black text-slate-900 flex items-center gap-2 flex-wrap">
+              <span>📅</span> 訓練日誌時間軸
+              <span class="text-xs font-normal text-slate-500">(共 {{ currentStudent.logs.length }} 筆紀錄)</span>
+            </h3>
+          </div>
+
+          <button 
+            @click="openLogModal()" 
+            class="w-full sm:w-auto px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 active:scale-95 text-white text-sm font-black rounded-xl shadow-md transition flex items-center justify-center gap-1.5">
+            <span>+ 新增今日訓練紀錄</span>
+          </button>
+        </div>
+
+        <!-- 若尚無紀錄 -->
+        <div v-if="currentStudent.logs.length === 0" class="bg-white rounded-2xl border border-slate-200 p-10 text-center space-y-2">
+          <div class="text-3xl">🏋️‍♂️</div>
+          <p class="text-sm font-bold text-slate-700">尚無任何訓練紀錄</p>
+          <p class="text-xs text-slate-400">點擊上方「+ 新增今日訓練紀錄」開始記錄第一堂課！</p>
+        </div>
+
+        <!-- 訓練紀錄折疊卡片清單 -->
+        <div class="space-y-3">
+          <div 
+            v-for="log in sortedLogs" 
+            :key="log.id"
+            class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden transition">
+            
+            <!-- 卡片標頭（點擊可展開/收合） -->
+            <div 
+              @click="toggleLogExpand(log.id)"
+              class="p-4 sm:px-5 flex flex-wrap items-center justify-between gap-2 cursor-pointer hover:bg-slate-50/80 transition select-none">
+              <div class="flex items-center gap-2.5 flex-wrap">
+                <span class="px-2.5 py-1 rounded-lg bg-slate-900 text-white font-mono text-xs font-bold">
+                  {{ log.date }}
+                </span>
+                <span class="px-2 py-0.5 rounded-md bg-indigo-50 text-indigo-700 border border-indigo-200 text-xs font-bold">
+                  第 {{ log.sessionNumber }} 堂
+                </span>
+                <span class="font-black text-sm sm:text-base text-slate-800">
+                  {{ log.focusArea }}
+                </span>
+                <span v-if="log.condition" class="px-2 py-0.5 rounded-full bg-amber-50 text-amber-800 border border-amber-200 text-xs font-medium">
+                  狀態：{{ log.condition }}
+                </span>
+              </div>
+
+              <div class="flex items-center gap-3">
+                <span class="text-xs text-slate-400">{{ log.exercises.length }} 個動作</span>
+                <span class="text-slate-400 text-sm font-bold">{{ expandedLogIds.includes(log.id) ? '▲' : '▼' }}</span>
+              </div>
+            </div>
+
+            <!-- 卡片詳細內容（展開時顯示） -->
+            <div v-if="expandedLogIds.includes(log.id)" class="px-4 sm:px-5 pb-5 pt-2 border-t border-slate-100 space-y-4 bg-slate-50/30">
+              
+              <!-- 動作列表 -->
+              <div class="space-y-3">
+                <div 
+                  v-for="(ex, exIdx) in log.exercises" 
+                  :key="exIdx"
+                  class="bg-white rounded-xl p-3.5 border border-slate-200/90 shadow-sm space-y-2.5">
+                  
+                  <!-- 動作名稱 + 對應器材圖片對照 + 器材刻度 -->
+                  <div class="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 pb-2.5">
+                    <div class="flex items-center gap-3 min-w-0">
+                      <!-- 器材縮圖（優先顯示實拍照片，其次顯示內建圖示，點擊可放大檢視） -->
+                      <button 
+                        v-if="getExerciseImage(ex)"
+                        type="button"
+                        @click.stop="openImagePreview(getExerciseImage(ex), ex.name, ex.machineSetting)"
+                        class="w-14 h-14 sm:w-16 sm:h-16 rounded-xl border border-slate-200 bg-slate-50 overflow-hidden shrink-0 relative group shadow-sm hover:ring-2 hover:ring-indigo-500 transition"
+                        title="點擊放大檢視器材圖片">
+                        <img :src="getExerciseImage(ex)" :alt="ex.name" class="w-full h-full object-cover">
+                        <span class="absolute bottom-0 right-0 bg-slate-900/75 text-white text-[10px] px-1 rounded-tl">🔍</span>
+                      </button>
+
+                      <div class="min-w-0">
+                        <div class="font-black text-sm sm:text-base text-slate-900 break-words">
+                          {{ exIdx + 1 }}. {{ ex.name }}
+                        </div>
+                        <div class="flex flex-wrap items-center gap-1.5 mt-1">
+                          <span v-if="ex.photoUrl" class="text-xs px-2 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200 font-bold">
+                            📷 實拍器材照
+                          </span>
+                          <span v-else-if="getMatchedEquipment(ex.name)" class="text-xs px-2 py-0.5 rounded bg-indigo-50 text-indigo-700 border border-indigo-200 font-medium">
+                            🏷️ {{ getMatchedEquipment(ex.name).enName }}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div v-if="ex.machineSetting" class="text-xs font-mono bg-slate-100 text-slate-700 px-2.5 py-1 rounded-lg border border-slate-200 break-words">
+                      ⚙️ 刻度：{{ ex.machineSetting }}
+                    </div>
+                  </div>
+
+                  <!-- 各組數據表格 -->
+                  <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2">
+                    <div 
+                      v-for="(set, sIdx) in ex.sets" 
+                      :key="sIdx"
+                      class="flex items-center justify-between gap-2 bg-slate-50 px-3 py-2 rounded-lg border border-slate-200/70 text-xs font-mono">
+                      <span class="text-slate-400 font-bold">Set {{ sIdx + 1 }}</span>
+                      <span class="font-bold text-slate-800">{{ set.weight }} kg × {{ set.reps }} 下</span>
+                      <span v-if="set.rpe" class="px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700 text-xs font-bold">
+                        RPE {{ set.rpe }}
+                      </span>
+                    </div>
+                  </div>
+
+                  <!-- 教練觀察備註 -->
+                  <div v-if="ex.notes" class="text-xs text-slate-600 bg-amber-50/60 p-2.5 rounded-lg border border-amber-200/60 flex items-start gap-1.5">
+                    <span class="shrink-0">💡</span>
+                    <span class="break-words">{{ ex.notes }}</span>
+                  </div>
+                </div>
+              </div>
+
+              <!-- 編輯與刪除按鈕列 -->
+              <div class="flex flex-wrap justify-end gap-2 pt-1">
+                <button @click="openLogModal(log)" class="px-3 py-1.5 bg-white hover:bg-indigo-50 text-indigo-700 border border-indigo-200 rounded-lg text-xs font-bold transition">
+                  ✏️ 編輯此堂紀錄
+                </button>
+                <button @click="deleteLog(log.id)" class="px-3 py-1.5 bg-white hover:bg-rose-50 text-rose-600 border border-rose-200 rounded-lg text-xs font-bold transition">
+                  🗑️ 刪除
+                </button>
+              </div>
+            </div>
+
+          </div>
+        </div>
+      </div>
+
+    </section>
+
+    <!-- ==================== 空白初始狀態（無預設假資料，引導建立第一位學員） ==================== -->
+    <section v-else class="lg:col-span-9 bg-white rounded-2xl border border-slate-200 shadow-sm p-8 sm:p-14 text-center space-y-4">
+      <div class="w-16 h-16 mx-auto rounded-2xl bg-indigo-50 border border-indigo-100 flex items-center justify-center text-3xl">
+        🏋️‍♂️
+      </div>
+      <div class="space-y-1.5 max-w-md mx-auto">
+        <h2 class="text-lg sm:text-xl font-black text-slate-900">歡迎使用 ProCoach 訓練紀錄系統</h2>
+        <p class="text-xs sm:text-sm text-slate-500 leading-relaxed">
+          目前學員資料庫為空白狀態。每位學員皆擁有獨立的合約堂數、紅旗傷病警示與器材圖文訓練日誌，資料不會互相干擾。
+        </p>
+      </div>
+      <div class="pt-2">
+        <button @click="openStudentModal()" class="px-6 py-3 bg-indigo-600 hover:bg-indigo-700 active:scale-95 text-white text-sm font-black rounded-xl shadow-md transition inline-flex items-center gap-2">
+          <span>+</span><span>建立第一位學員檔案</span>
+        </button>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- ==================== 4. 彈跳視窗 A：新增 / 編輯訓練紀錄表單 ==================== -->
+  <div v-if="logModal.show" class="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 overflow-y-auto">
+    <div class="bg-white w-full max-w-3xl rounded-t-3xl sm:rounded-3xl shadow-2xl border border-slate-200 max-h-[92vh] flex flex-col">
+      
+      <!-- Modal Header -->
+      <div class="px-5 py-4 border-b border-slate-100 flex items-center justify-between sticky top-0 bg-white rounded-t-3xl z-10">
+        <div>
+          <h3 class="text-base sm:text-lg font-black text-slate-900">
+            {{ logModal.isEdit ? '✏️ 編輯訓練日誌' : '🏋️‍♂️ 新增今日訓練紀錄' }}
+          </h3>
+          <p class="text-xs text-slate-500">學員：{{ currentStudent?.name }}</p>
+        </div>
+        <button @click="logModal.show = false" class="w-8 h-8 rounded-full bg-slate-100 hover:bg-slate-200 flex items-center justify-center text-slate-600 font-bold shrink-0">✕</button>
+      </div>
+
+      <!-- Modal Body (可捲動) -->
+      <div class="p-5 overflow-y-auto space-y-5 flex-1">
+        
+        <!-- ⚡ 神隊友功能：一鍵帶入上次訓練課表 -->
+        <div v-if="!logModal.isEdit && currentStudent && currentStudent.logs.length > 0" class="bg-indigo-50 border border-indigo-200 rounded-xl p-3 flex flex-wrap items-center justify-between gap-2">
+          <div class="text-xs text-indigo-900">
+            <span class="font-bold">⚡ 現場極速登記：</span>直接複製上一次上課的動作、器材照片與重量再微調！
+          </div>
+          <button 
+            @click="copyLastWorkout" 
+            type="button"
+            class="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-lg shadow-sm transition">
+            帶入上次課表 ({{ sortedLogs[0].focusArea }})
+          </button>
+        </div>
+
+        <!-- 基本資訊：日期、課次、訓練部位 -->
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+          <div>
+            <label class="block font-bold text-slate-600 mb-1">上課日期</label>
+            <input v-model="logModal.form.date" type="date" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-slate-800 font-mono">
+          </div>
+          <div>
+            <label class="block font-bold text-slate-600 mb-1">第幾堂課</label>
+            <input v-model.number="logModal.form.sessionNumber" type="number" min="1" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-slate-800 font-mono font-bold">
+          </div>
+          <div>
+            <label class="block font-bold text-slate-600 mb-1">今日訓練部位</label>
+            <input v-model="logModal.form.focusArea" type="text" placeholder="如：下肢推、上肢拉" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-slate-800 font-bold">
+          </div>
+        </div>
+
+        <!-- 訓練部位快選膠囊 -->
+        <div class="flex flex-wrap gap-1.5">
+          <span class="text-xs text-slate-400 self-center mr-1">快選部位：</span>
+          <button 
+            v-for="area in ['下肢推 (臀腿)', '上肢推 (胸肩三頭)', '上肢拉 (背二頭)', '全身性功能訓練', '核心與活動度']" 
+            :key="area"
+            type="button"
+            @click="logModal.form.focusArea = area"
+            class="px-2.5 py-1 bg-slate-100 hover:bg-indigo-100 hover:text-indigo-700 text-slate-600 rounded-lg text-xs font-medium transition">
+            {{ area }}
+          </button>
+        </div>
+
+        <!-- 當日學員狀態 -->
+        <div>
+          <label class="block text-xs font-bold text-slate-600 mb-1.5">學員今日身心狀態</label>
+          <div class="flex flex-wrap gap-1.5">
+            <button 
+              v-for="cond in ['狀態極佳', '正常穩定', '睡眠不足', '工作疲勞', '生理期', '肌肉痠痛中']" 
+              :key="cond"
+              type="button"
+              @click="logModal.form.condition = cond"
+              :class="logModal.form.condition === cond ? 'bg-amber-500 text-white font-bold shadow-sm' : 'bg-slate-50 text-slate-600 border border-slate-200'"
+              class="px-3 py-1.5 rounded-xl text-xs transition">
+              {{ cond }}
+            </button>
+          </div>
+        </div>
+
+        <!-- 動態動作與組數編輯器 -->
+        <div class="space-y-4 border-t border-slate-100 pt-4">
+          <div class="flex flex-wrap items-center justify-between gap-2">
+            <h4 class="text-sm font-black text-slate-800">訓練動作與器材明細</h4>
+            <button 
+              type="button" 
+              @click="addExerciseToForm" 
+              class="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl shadow-sm transition">
+              + 新增訓練動作
+            </button>
+          </div>
+
+          <div 
+            v-for="(ex, exIdx) in logModal.form.exercises" 
+            :key="exIdx"
+            class="bg-slate-50 rounded-2xl p-4 border border-slate-200 space-y-3.5 relative">
+            
+            <!-- 動作標題與刪除 -->
+            <div class="flex items-center justify-between gap-2">
+              <span class="text-xs font-black text-indigo-600">動作 #{{ exIdx + 1 }}</span>
+              <button v-if="logModal.form.exercises.length > 1" @click="removeExerciseFromForm(exIdx)" type="button" class="text-xs text-rose-500 hover:underline font-bold">
+                移除此動作
+              </button>
+            </div>
+
+            <!-- 內建器材視覺化快速選取列（含器材小圖對照） -->
+            <div class="space-y-1.5">
+              <div class="flex items-center justify-between">
+                <label class="text-xs font-bold text-slate-600">快速點選內建器材圖庫（點擊自動帶入名稱與圖示）：</label>
+              </div>
+              <div class="flex gap-2 overflow-x-auto pb-1.5 no-scrollbar">
+                <button
+                  v-for="eq in equipmentLibrary"
+                  :key="eq.id"
+                  type="button"
+                  @click="selectPresetEquipment(exIdx, eq)"
+                  :class="ex.equipmentId === eq.id ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm' : 'bg-white text-slate-700 border-slate-200 hover:border-indigo-300'"
+                  class="flex items-center gap-2 px-2.5 py-1.5 rounded-xl border text-xs font-bold shrink-0 transition">
+                  <img :src="eq.image" :alt="eq.name" class="w-7 h-7 rounded-lg object-cover bg-slate-100 shrink-0">
+                  <span>{{ eq.name }}</span>
+                </button>
+              </div>
+            </div>
+
+            <!-- 器材名稱並排對應圖片預覽 + 現場拍照上傳 + 器材刻度 -->
+            <div class="bg-white p-3 rounded-xl border border-slate-200 space-y-3">
+              <div class="flex flex-wrap sm:flex-nowrap items-center gap-3">
+                
+                <!-- 器材圖片即時對照框（顯示實拍照片或內建器材圖示） -->
+                <div class="w-16 h-16 sm:w-20 sm:h-20 rounded-xl border border-slate-200 bg-slate-100 overflow-hidden shrink-0 relative flex items-center justify-center">
+                  <img 
+                    v-if="getExerciseImage(ex)" 
+                    :src="getExerciseImage(ex)" 
+                    :alt="ex.name" 
+                    @click="openImagePreview(getExerciseImage(ex), ex.name || '器材預覽', ex.machineSetting)"
+                    class="w-full h-full object-cover cursor-pointer">
+                  <span v-else class="text-xs text-slate-400 text-center px-1">無器材圖</span>
+                  
+                  <!-- 清除自拍照片小按鈕 -->
+                  <button 
+                    v-if="ex.photoUrl" 
+                    type="button" 
+                    @click="clearExercisePhoto(exIdx)"
+                    title="移除實拍照片"
+                    class="absolute top-0.5 right-0.5 w-5 h-5 rounded-full bg-rose-600 text-white text-xs flex items-center justify-center shadow">
+                    ✕
+                  </button>
+                </div>
+
+                <!-- 器材名稱輸入框 + 拍照上傳按鈕 -->
+                <div class="flex-1 min-w-[12rem] space-y-2 text-xs">
+                  <div>
+                    <label class="block text-slate-500 font-bold mb-1">器材 / 動作名稱（可選取或自由輸入）</label>
+                    <input 
+                      v-model="ex.name" 
+                      @input="onExerciseNameInput(exIdx)"
+                      list="preset-exercises" 
+                      placeholder="選擇上方器材或輸入具體動作（如：啞鈴上斜臥推）" 
+                      class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2 text-slate-900 font-bold focus:bg-white focus:ring-2 focus:ring-indigo-500 focus:outline-none">
+                  </div>
+
+                  <div class="flex flex-wrap items-center gap-2">
+                    <!-- 支援手機直接開啟相機拍照或從相簿選圖 -->
+                    <label class="px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 rounded-lg font-bold cursor-pointer inline-flex items-center gap-1.5 transition">
+                      <span>📷 拍照 / 上傳器材照</span>
+                      <input 
+                        type="file" 
+                        accept="image/*" 
+                        capture="environment"
+                        @change="handleExercisePhotoUpload($event, exIdx)" 
+                        class="hidden">
+                    </label>
+                    <span class="text-xs text-slate-400">
+                      {{ ex.photoUrl ? '已附加現場實拍照片' : (ex.equipmentId ? '目前使用內建器材圖示' : '可拍照記錄器材或刻度') }}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              <!-- 器材調整刻度 / 握距 -->
+              <div class="text-xs">
+                <label class="block text-slate-500 font-bold mb-1">器材調整刻度 / 握距 / 椅背角度</label>
+                <input 
+                  v-model="ex.machineSetting" 
+                  type="text" 
+                  placeholder="例：椅背30度、座椅高度第3格、握把中距" 
+                  class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2 text-slate-800">
+              </div>
+            </div>
+
+            <!-- 組數列表 (Set 1, Set 2...) -->
+            <div class="space-y-2">
+              <div class="flex items-center justify-between text-xs font-bold text-slate-500 px-1">
+                <span>組數明細 (重量 kg / 次數 / RPE 強度 1-10)</span>
+              </div>
+
+              <div 
+                v-for="(set, sIdx) in ex.sets" 
+                :key="sIdx"
+                class="flex flex-wrap sm:flex-nowrap items-center gap-1.5 bg-white p-2 rounded-xl border border-slate-200">
+                <span class="text-xs font-mono font-bold text-slate-400 w-10 text-center">S{{ sIdx + 1 }}</span>
+                <div class="flex-1 min-w-[5rem] flex items-center gap-1">
+                  <input v-model.number="set.weight" type="number" step="0.5" placeholder="重量" class="w-full bg-slate-50 border border-slate-200 rounded-lg px-2 py-1.5 text-xs font-mono font-bold text-center">
+                  <span class="text-xs text-slate-400">kg</span>
+                </div>
+                <div class="flex-1 min-w-[5rem] flex items-center gap-1">
+                  <input v-model.number="set.reps" type="number" placeholder="次數" class="w-full bg-slate-50 border border-slate-200 rounded-lg px-2 py-1.5 text-xs font-mono font-bold text-center">
+                  <span class="text-xs text-slate-400">下</span>
+                </div>
+                <div class="w-20 flex items-center gap-1">
+                  <input v-model.number="set.rpe" type="number" step="0.5" max="10" placeholder="RPE" class="w-full bg-indigo-50/50 border border-indigo-100 rounded-lg px-1.5 py-1.5 text-xs font-mono text-indigo-700 text-center">
+                </div>
+                <button v-if="ex.sets.length > 1" @click="removeSetFromExercise(exIdx, sIdx)" type="button" class="text-slate-400 hover:text-rose-600 px-1.5 text-xs">✕</button>
+              </div>
+
+              <!-- 新增組數與一鍵複製上一組 -->
+              <div class="flex flex-wrap gap-2 pt-1">
+                <button 
+                  type="button" 
+                  @click="addSetToExercise(exIdx, false)" 
+                  class="flex-1 py-1.5 bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 rounded-lg text-xs font-bold transition">
+                  + 新增空白組
+                </button>
+                <button 
+                  type="button" 
+                  @click="addSetToExercise(exIdx, true)" 
+                  class="flex-1 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 rounded-lg text-xs font-bold transition">
+                  📋 複製上一組
+                </button>
+              </div>
+            </div>
+
+            <!-- 教練動作表現備註 -->
+            <div>
+              <input 
+                v-model="ex.notes" 
+                type="text" 
+                placeholder="教練動作觀察備註（例：第8下開始代償聳肩，下次維持同重量）" 
+                class="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-700">
+            </div>
+          </div>
+        </div>
+
+        <!-- 常用複合動作下拉候選清單 -->
+        <datalist id="preset-exercises">
+          <option v-for="item in presetExercises" :key="item" :value="item"></option>
+        </datalist>
+
+        <!-- 自動扣堂勾選框 (僅新增時顯示) -->
+        <div v-if="!logModal.isEdit" class="bg-amber-50 border border-amber-200 rounded-xl p-3 flex items-start gap-2.5">
+          <input id="autoDeduct" v-model="logModal.autoDeduct" type="checkbox" class="w-4 h-4 mt-0.5 text-indigo-600 rounded focus:ring-indigo-500 shrink-0">
+          <label for="autoDeduct" class="text-xs font-bold text-amber-900 cursor-pointer leading-relaxed">
+            儲存後自動扣除 1 堂課（目前剩餘 {{ getRemainingSessions(currentStudent) }} 堂 ➔ 扣堂後剩 {{ Math.max(0, getRemainingSessions(currentStudent) - 1) }} 堂）
+          </label>
+        </div>
+
+      </div>
+
+      <!-- Modal Footer -->
+      <div class="px-5 py-3.5 border-t border-slate-100 bg-slate-50 rounded-b-3xl flex flex-wrap justify-end gap-2">
+        <button @click="logModal.show = false" type="button" class="px-4 py-2 bg-white border border-slate-200 text-slate-600 text-xs font-bold rounded-xl">
+          取消
+        </button>
+        <button @click="saveWorkoutLog" type="button" class="px-6 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs sm:text-sm font-black rounded-xl shadow-md">
+          💾 儲存訓練紀錄
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================== 5. 彈跳視窗 B：新增 / 編輯學員基本檔案（含「其他」訴求自訂輸入） ==================== -->
+  <div v-if="studentModal.show" class="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+    <div class="bg-white w-full max-w-md rounded-3xl shadow-2xl border border-slate-200 overflow-hidden flex flex-col max-h-[90vh]">
+      <div class="px-5 py-4 border-b border-slate-100 flex items-center justify-between shrink-0">
+        <h3 class="text-base font-black text-slate-900">
+          {{ studentModal.isEdit ? '✏️ 編輯學員基本檔案' : '👤 新增私人教練學員' }}
+        </h3>
+        <button @click="studentModal.show = false" class="text-slate-400 hover:text-slate-600 font-bold">✕</button>
+      </div>
+
+      <div class="p-5 space-y-4 text-xs overflow-y-auto">
+        <div>
+          <label class="block font-bold text-slate-700 mb-1">學員姓名 / 暱稱 *</label>
+          <input v-model="studentModal.form.name" type="text" placeholder="請輸入學員姓名" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-sm font-bold text-slate-900">
+        </div>
+
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block font-bold text-slate-700 mb-1">購買總堂數</label>
+            <input v-model.number="studentModal.form.totalSessions" type="number" min="1" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-sm font-mono font-bold">
+          </div>
+          <div>
+            <label class="block font-bold text-slate-700 mb-1">已使用堂數</label>
+            <input v-model.number="studentModal.form.usedSessions" type="number" min="0" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-sm font-mono font-bold">
+          </div>
+        </div>
+
+        <!-- 主要訓練訴求複選標籤 + 「其他」動態輸入框 -->
+        <div class="space-y-2">
+          <label class="block font-bold text-slate-700">主要訓練訴求（可複選）</label>
+          <div class="flex flex-wrap gap-1.5">
+            <button 
+              v-for="tag in availableGoals" 
+              :key="tag"
+              type="button"
+              @click="toggleGoalTag(tag)"
+              :class="studentModal.form.goals.includes(tag) ? 'bg-indigo-600 text-white font-bold shadow-sm' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'"
+              class="px-3 py-1.5 rounded-xl transition">
+              {{ tag }}
+            </button>
+          </div>
+
+          <!-- 當勾選「其他」時，動態顯示自訂訴求輸入框 -->
+          <div v-if="studentModal.form.goals.includes('其他')" class="pt-1.5">
+            <label class="block text-indigo-700 font-bold mb-1">請填寫「其他」具體訓練訴求：</label>
+            <input 
+              v-model="studentModal.form.customGoal" 
+              type="text" 
+              placeholder="例：三鐵備賽體能、婚前體態衝刺、高爾夫旋轉爆發力..." 
+              class="w-full bg-indigo-50/60 border border-indigo-300 rounded-xl p-2.5 text-slate-900 font-bold focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500">
+          </div>
+        </div>
+
+        <div>
+          <label class="block font-bold text-rose-700 mb-1">🚨 傷病史與動作禁忌（紅旗警示）</label>
+          <textarea 
+            v-model="studentModal.form.injuries" 
+            rows="2" 
+            placeholder="例：腰椎間盤突出、左肩夾擠、右膝蓋舊傷..." 
+            class="w-full bg-rose-50/50 border border-rose-200 rounded-xl p-2.5 text-slate-800">
+          </textarea>
+        </div>
+      </div>
+
+      <div class="px-5 py-3.5 border-t border-slate-100 bg-slate-50 flex justify-end gap-2 shrink-0">
+        <button @click="studentModal.show = false" class="px-4 py-2 bg-white border border-slate-200 text-slate-600 text-xs font-bold rounded-xl">取消</button>
+        <button @click="saveStudentForm" class="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-xl shadow">儲存檔案</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================== 6. 彈跳視窗 C：手動微調堂數 ==================== -->
+  <div v-if="sessionAdjustModal.show" class="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+    <div class="bg-white w-full max-w-xs rounded-3xl shadow-2xl border border-slate-200 p-5 space-y-4">
+      <h3 class="text-sm font-black text-slate-900">⚙️ 手動調整堂數</h3>
+      <div class="space-y-3 text-xs">
+        <div>
+          <label class="block text-slate-500 font-bold mb-1">購買總堂數</label>
+          <input v-model.number="sessionAdjustModal.total" type="number" min="0" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2 font-mono font-bold text-sm">
+        </div>
+        <div>
+          <label class="block text-slate-500 font-bold mb-1">已使用堂數</label>
+          <input v-model.number="sessionAdjustModal.used" type="number" min="0" class="w-full bg-slate-50 border border-slate-200 rounded-xl p-2 font-mono font-bold text-sm">
+        </div>
+      </div>
+      <div class="flex justify-end gap-2 pt-2">
+        <button @click="sessionAdjustModal.show = false" class="px-3 py-1.5 bg-slate-100 text-slate-600 rounded-xl text-xs font-bold">取消</button>
+        <button @click="saveSessionAdjust" class="px-4 py-1.5 bg-indigo-600 text-white rounded-xl text-xs font-bold">確認更新</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================== 7. 彈跳視窗 D：器材圖片放大燈箱 ==================== -->
+  <div v-if="imagePreviewModal.show" @click="imagePreviewModal.show = false" class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+    <div @click.stop class="bg-white rounded-3xl max-w-lg w-full overflow-hidden shadow-2xl border border-slate-200">
+      <div class="px-5 py-3.5 border-b border-slate-100 flex items-center justify-between">
+        <div>
+          <h4 class="text-sm font-black text-slate-900">{{ imagePreviewModal.title }}</h4>
+          <p v-if="imagePreviewModal.subtitle" class="text-xs text-slate-500 font-mono">⚙️ {{ imagePreviewModal.subtitle }}</p>
+        </div>
+        <button @click="imagePreviewModal.show = false" class="w-8 h-8 rounded-full bg-slate-100 hover:bg-slate-200 flex items-center justify-center text-slate-700 font-bold">✕</button>
+      </div>
+      <div class="p-4 bg-slate-100 flex items-center justify-center">
+        <img :src="imagePreviewModal.url" :alt="imagePreviewModal.title" class="max-h-[65vh] w-auto rounded-2xl shadow-sm object-contain bg-white">
+      </div>
+    </div>
+  </div>
+
+  <!-- 自訂輕量 Toast 提示訊息（取代原生 alert） -->
+  <div v-if="toastMessage" class="fixed bottom-5 left-1/2 -translate-x-1/2 z-50 bg-slate-900 text-white px-4 py-2.5 rounded-full text-xs font-bold shadow-xl flex items-center gap-2 transition max-w-[90vw] text-center">
+    <span>✅</span>
+    <span>{{ toastMessage }}</span>
+  </div>
+
+</div>
+
+<script>
+const { createApp, ref, computed, onMounted } = Vue;
+
+// 輔助函式：動態生成高品質內建器材 SVG 插畫 Data URI（零外部圖片失效風險）
+const makeEquipmentSvg = (bgHex, accentHex, label, svgPath) => {
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120">
+    <rect width="120" height="120" rx="20" fill="${bgHex}"/>
+    <g stroke="${accentHex}" stroke-width="5" stroke-linecap="round" stroke-linejoin="round" fill="none">
+      ${svgPath}
+    </g>
+    <text x="60" y="106" text-anchor="middle" font-family="sans-serif" font-size="13" font-weight="bold" fill="${accentHex}">${label}</text>
+  </svg>`;
+  return 'data:image/svg+xml;utf8,' + encodeURIComponent(svg);
+};
+
+createApp({
+  setup() {
+    // ==================== 1. 內建健身器材圖庫 (11種常用器材 + 專屬插畫圖示) ====================
+    const equipmentLibrary = [
+      {
+        id: 'dumbbell',
+        name: '啞鈴',
+        enName: 'Dumbbell',
+        image: makeEquipmentSvg('#EEF2FF', '#4338CA', 'DUMBBELL', '<rect x="18" y="34" width="12" height="36" rx="3" fill="#4338CA"/><rect x="30" y="28" width="10" height="48" rx="3" fill="#4338CA"/><line x1="40" y1="52" x2="80" y2="52" stroke-width="7"/><rect x="80" y="28" width="10" height="48" rx="3" fill="#4338CA"/><rect x="90" y="34" width="12" height="36" rx="3" fill="#4338CA"/>')
+      },
+      {
+        id: 'barbell',
+        name: '槓鈴',
+        enName: 'Barbell',
+        image: makeEquipmentSvg('#F0FDF4', '#15803D', 'BARBELL', '<line x1="10" y1="52" x2="110" y2="52" stroke-width="5"/><rect x="20" y="26" width="8" height="52" rx="2" fill="#15803D"/><rect x="31" y="32" width="7" height="40" rx="2" fill="#15803D"/><rect x="82" y="32" width="7" height="40" rx="2" fill="#15803D"/><rect x="92" y="26" width="8" height="52" rx="2" fill="#15803D"/>')
+      },
+      {
+        id: 'smith',
+        name: '史密斯機',
+        enName: 'Smith Machine',
+        image: makeEquipmentSvg('#FFFBEB', '#B45309', 'SMITH', '<line x1="28" y1="18" x2="28" y2="85"/><line x1="92" y1="18" x2="92" y2="85"/><line x1="16" y1="50" x2="104" y2="50" stroke-width="6"/><rect x="20" y="34" width="8" height="32" fill="#B45309"/><rect x="92" y="34" width="8" height="32" fill="#B45309"/><line x1="20" y1="85" x2="100" y2="85"/>')
+      },
+      {
+        id: 'lat_pulldown',
+        name: '滑輪下拉機',
+        enName: 'Lat Pulldown',
+        image: makeEquipmentSvg('#EFF6FF', '#1D4ED8', 'LAT PULL', '<path d="M35 85 L35 20 L80 20"/><line x1="75" y1="20" x2="75" y2="42" stroke-dasharray="4 3"/><path d="M52 44 Q75 40 98 44"/><rect x="55" y="68" width="32" height="8" rx="3" fill="#1D4ED8"/>')
+      },
+      {
+        id: 'seated_row',
+        name: '坐姿划船機',
+        enName: 'Seated Row',
+        image: makeEquipmentSvg('#F0FDFA', '#0F766E', 'SEATED ROW', '<line x1="20" y1="82" x2="100" y2="82"/><rect x="28" y="64" width="30" height="8" rx="3" fill="#0F766E"/><line x1="78" y1="30" x2="78" y2="82"/><line x1="56" y1="52" x2="78" y2="52"/><circle cx="54" cy="52" r="5" fill="#0F766E"/>')
+      },
+      {
+        id: 'leg_press',
+        name: '腿推機',
+        enName: 'Leg Press',
+        image: makeEquipmentSvg('#FDF2F8', '#BE185D', 'LEG PRESS', '<path d="M24 78 L42 62 L42 82"/><line x1="36" y1="74" x2="84" y2="34" stroke-width="6"/><line x1="72" y1="22" x2="96" y2="46" stroke-width="7"/>')
+      },
+      {
+        id: 'hack_squat',
+        name: '哈克深蹲機',
+        enName: 'Hack Squat',
+        image: makeEquipmentSvg('#FEF2F2', '#B91C1C', 'HACK SQUAT', '<line x1="32" y1="82" x2="76" y2="22" stroke-width="6"/><rect x="44" y="34" width="16" height="28" rx="4" transform="rotate(36 44 34)" fill="#B91C1C"/><line x1="22" y1="82" x2="96" y2="82"/>')
+      },
+      {
+        id: 'pec_deck',
+        name: '蝴蝶機',
+        enName: 'Pec Deck',
+        image: makeEquipmentSvg('#F5F3FF', '#6D28D9', 'PEC DECK', '<line x1="60" y1="20" x2="60" y2="84"/><path d="M60 32 Q32 35 34 62"/><path d="M60 32 Q88 35 86 62"/><rect x="48" y="64" width="24" height="8" rx="3" fill="#6D28D9"/>')
+      },
+      {
+        id: 'cable',
+        name: '龍門架',
+        enName: 'Cable Crossover',
+        image: makeEquipmentSvg('#ECFEFF', '#0E7490', 'CABLE', '<path d="M24 84 L24 22 L96 22 L96 84"/><line x1="24" y1="38" x2="48" y2="56" stroke-dasharray="4 3"/><line x1="96" y1="38" x2="72" y2="56" stroke-dasharray="4 3"/><circle cx="48" cy="56" r="4" fill="#0E7490"/><circle cx="72" cy="56" r="4" fill="#0E7490"/>')
+      },
+      {
+        id: 'kettlebell',
+        name: '壺鈴',
+        enName: 'Kettlebell',
+        image: makeEquipmentSvg('#FFF7ED', '#C2410C', 'KETTLEBELL', '<path d="M44 40 C44 22, 76 22, 76 40" stroke-width="6"/><circle cx="60" cy="62" r="22" fill="#C2410C"/>')
+      },
+      {
+        id: 'bodyweight',
+        name: '徒手/自體重量',
+        enName: 'Bodyweight',
+        image: makeEquipmentSvg('#F8FAFC', '#334155', 'BODYWEIGHT', '<circle cx="60" cy="28" r="8" fill="#334155"/><line x1="60" y1="36" x2="60" y2="62"/><line x1="38" y1="46" x2="82" y2="46"/><line x1="60" y1="62" x2="44" y2="84"/><line x1="60" y1="62" x2="76" y2="84"/>')
+      }
+    ];
+
+    // ==================== 2. 系統核心狀態（無預設假資料，完全由空白起步） ====================
+    const STORAGE_KEY = 'procoach_students_clean_v2';
+    const FONT_SCALE_KEY = 'procoach_font_scale_v1';
+
+    const students = ref([]);
+    const selectedStudentId = ref('');
+    const searchQuery = ref('');
+    const showBodyMetrics = ref(false);
+    const isEditingInjury = ref(false);
+    const expandedLogIds = ref([]);
+    const toastMessage = ref('');
+    const fontScale = ref(100);
+
+    // 主要訓練訴求選項（含「其他」）
+    const availableGoals = ['增肌', '減脂體態雕塑', '肌力提升', '體態矯正', '產後恢復', '銀髮族功能性訓練', '運動表現', '其他'];
+
+    // 常用複合動作下拉候選
+    const presetExercises = [
+      '啞鈴上斜臥推', '啞鈴平板臥推', '啞鈴肩推', '啞鈴單臂划船', '啞鈴保加利亞分腿蹲',
+      '槓鈴深蹲', '傳統槓鈴硬舉', '羅馬尼亞硬舉 (RDL)', '槓鈴臥推',
+      '史密斯機深蹲', '史密斯機上斜臥推', '史密斯機臀推',
+      '滑輪下拉 (寬握)', '坐姿器械划船', '腿推機 (Leg Press)',
+      '哈克深蹲機深蹲', '蝴蝶機夾胸', '龍門架繩索夾胸', '龍門架臉拉 (Face Pull)',
+      '壺鈴搖擺 (Swing)', '徒手棒式核心支撐'
+    ];
+
+    // 字體縮放控制 (100% ~ 200%)
+    const applyFontScale = () => {
+      const clamped = Math.min(200, Math.max(100, Number(fontScale.value) || 100));
+      fontScale.value = clamped;
+      document.documentElement.style.fontSize = `${(16 * clamped) / 100}px`;
+      localStorage.setItem(FONT_SCALE_KEY, String(clamped));
+    };
+
+    const changeFontScale = (delta) => {
+      fontScale.value = Math.min(200, Math.max(100, fontScale.value + delta));
+      applyFontScale();
+    };
+
+    // 顯示輕量提示框
+    const showToast = (msg) => {
+      toastMessage.value = msg;
+      setTimeout(() => { toastMessage.value = ''; }, 2800);
+    };
+
+    // 儲存至 localStorage（包含容量保護機制）
+    const saveToLocal = () => {
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(students.value));
+      } catch (e) {
+        showToast('儲存空間已滿，建議減少過多高畫質照片或刪除舊紀錄');
+      }
+    };
+
+    // 載入資料（無預設假資料，若無資料則保持空陣列 []）
+    const loadData = () => {
+      const savedScale = localStorage.getItem(FONT_SCALE_KEY);
+      if (savedScale) {
+        fontScale.value = Number(savedScale) || 100;
+        applyFontScale();
+      }
+
+      const saved = localStorage.getItem(STORAGE_KEY);
+      if (saved) {
+        try {
+          const parsed = JSON.parse(saved);
+          students.value = Array.isArray(parsed) ? parsed : [];
+        } catch (e) {
+          students.value = [];
+        }
+      } else {
+        students.value = [];
+      }
+
+      if (students.value.length > 0) {
+        selectStudent(students.value[0].id);
+      }
+    };
+
+    // 清空所有資料
+    const clearAllData = () => {
+      students.value = [];
+      selectedStudentId.value = '';
+      localStorage.removeItem(STORAGE_KEY);
+      showToast('已清空所有學員資料');
+    };
+
+    // ==================== 3. 計算屬性與顯示輔助 ====================
+    const filteredStudents = computed(() => {
+      const q = searchQuery.value.trim().toLowerCase();
+      if (!q) return students.value;
+      return students.value.filter(s => s.name.toLowerCase().includes(q));
+    });
+
+    const currentStudent = computed(() => {
+      return students.value.find(s => s.id === selectedStudentId.value) || null;
+    });
+
+    // 格式化顯示訴求標籤（將「其他」與自訂文字合併顯示）
+    const formatDisplayGoals = (stu) => {
+      if (!stu || !Array.isArray(stu.goals)) return [];
+      return stu.goals.map(g => {
+        if (g === '其他') {
+          return stu.customGoal && stu.customGoal.trim() ? `其他：${stu.customGoal.trim()}` : '其他';
+        }
+        return g;
+      });
+    };
+
+    const getRemainingSessions = (stu) => {
+      if (!stu) return 0;
+      return Math.max(0, (stu.totalSessions || 0) - (stu.usedSessions || 0));
+    };
+
+    const sessionPercentage = computed(() => {
+      if (!currentStudent.value || !currentStudent.value.totalSessions) return 0;
+      const rem = getRemainingSessions(currentStudent.value);
+      return Math.min(100, Math.round((rem / currentStudent.value.totalSessions) * 100));
+    });
+
+    const sortedLogs = computed(() => {
+      if (!currentStudent.value || !currentStudent.value.logs) return [];
+      return [...currentStudent.value.logs].sort((a, b) => {
+        if (b.date !== a.date) return b.date.localeCompare(a.date);
+        return (b.sessionNumber || 0) - (a.sessionNumber || 0);
+      });
+    });
+
+    // ==================== 4. 器材圖片解析與拍照壓縮處理 ====================
+    const getMatchedEquipment = (nameOrId) => {
+      if (!nameOrId) return null;
+      const str = String(nameOrId).toLowerCase();
+      return equipmentLibrary.find(eq => eq.id === str || str.includes(eq.name.toLowerCase())) || null;
+    };
+
+    // 取得該動作應顯示的圖片（優先實拍照片 -> 指定內建器材 -> 依名稱自動匹配內建器材）
+    const getExerciseImage = (ex) => {
+      if (!ex) return '';
+      if (ex.photoUrl) return ex.photoUrl;
+      if (ex.equipmentId) {
+        const eq = equipmentLibrary.find(item => item.id === ex.equipmentId);
+        if (eq) return eq.image;
+      }
+      const autoEq = getMatchedEquipment(ex.name);
+      return autoEq ? autoEq.image : '';
+    };
+
+    // 圖片放大檢視燈箱
+    const imagePreviewModal = ref({ show: false, url: '', title: '', subtitle: '' });
+    const openImagePreview = (url, title, subtitle = '') => {
+      if (!url) return;
+      imagePreviewModal.value = { show: true, url, title: title || '器材圖片', subtitle };
+    };
+
+    // 選擇內建器材圖庫項目
+    const selectPresetEquipment = (exIdx, eq) => {
+      const ex = logModal.value.form.exercises[exIdx];
+      ex.equipmentId = eq.id;
+      if (!ex.name || equipmentLibrary.some(item => item.name === ex.name)) {
+        ex.name = eq.name;
+      }
+    };
+
+    // 手動打字時自動比對對應的內建器材圖示
+    const onExerciseNameInput = (exIdx) => {
+      const ex = logModal.value.form.exercises[exIdx];
+      const matched = getMatchedEquipment(ex.name);
+      ex.equipmentId = matched ? matched.id : '';
+    };
+
+    // 現場拍照 / 上傳圖片並透過 Canvas 自動壓縮（節省 localStorage 空間）
+    const handleExercisePhotoUpload = (event, exIdx) => {
+      const file = event.target.files && event.target.files[0];
+      if (!file) return;
+
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const img = new Image();
+        img.onload = () => {
+          const canvas = document.createElement('canvas');
+          const MAX_DIM = 480; // 壓縮至最大邊長 480px，清晰且僅約 35KB
+          let width = img.width;
+          let height = img.height;
+
+          if (width > height && width > MAX_DIM) {
+            height = Math.round((height * MAX_DIM) / width);
+            width = MAX_DIM;
+          } else if (height > MAX_DIM) {
+            width = Math.round((width * MAX_DIM) / height);
+            height = MAX_DIM;
+          }
+
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          ctx.drawImage(img, 0, 0, width, height);
+
+          const compressedDataUrl = canvas.toDataURL('image/jpeg', 0.72);
+          logModal.value.form.exercises[exIdx].photoUrl = compressedDataUrl;
+          showToast('已成功附加器材照片！');
+        };
+        img.src = e.target.result;
+      };
+      reader.readAsDataURL(file);
+      event.target.value = '';
+    };
+
+    const clearExercisePhoto = (exIdx) => {
+      logModal.value.form.exercises[exIdx].photoUrl = '';
+    };
+
+    // ==================== 5. 學員切換與檔案管理邏輯 ====================
+    const selectStudent = (id) => {
+      selectedStudentId.value = id;
+      isEditingInjury.value = false;
+      const stu = students.value.find(s => s.id === id);
+      if (stu && stu.logs && stu.logs.length > 0) {
+        const latest = [...stu.logs].sort((a, b) => b.date.localeCompare(a.date))[0];
+        expandedLogIds.value = [latest.id];
+      } else {
+        expandedLogIds.value = [];
+      }
+    };
+
+    const saveInjuryQuickEdit = () => {
+      isEditingInjury.value = false;
+      saveToLocal();
+      showToast('已更新傷病史與禁忌提醒');
+    };
+
+    const adjustSessions = (addCount) => {
+      if (!currentStudent.value) return;
+      currentStudent.value.totalSessions += addCount;
+      saveToLocal();
+      showToast(`已為 ${currentStudent.value.name} 增加 ${addCount} 堂課`);
+    };
+
+    const sessionAdjustModal = ref({ show: false, total: 0, used: 0 });
+    const openSessionAdjustModal = () => {
+      if (!currentStudent.value) return;
+      sessionAdjustModal.value = {
+        show: true,
+        total: currentStudent.value.totalSessions,
+        used: currentStudent.value.usedSessions
+      };
+    };
+    const saveSessionAdjust = () => {
+      if (!currentStudent.value) return;
+      currentStudent.value.totalSessions = Math.max(0, sessionAdjustModal.value.total);
+      currentStudent.value.usedSessions = Math.max(0, sessionAdjustModal.value.used);
+      sessionAdjustModal.value.show = false;
+      saveToLocal();
+      showToast('堂數已更新');
+    };
+
+    // 新增/編輯學員 Modal（含 customGoal 欄位）
+    const studentModal = ref({
+      show: false,
+      isEdit: false,
+      editId: '',
+      form: { name: '', totalSessions: 12, usedSessions: 0, goals: [], customGoal: '', injuries: '' }
+    });
+
+    const openStudentModal = (stu = null) => {
+      if (stu) {
+        studentModal.value = {
+          show: true,
+          isEdit: true,
+          editId: stu.id,
+          form: {
+            name: stu.name,
+            totalSessions: stu.totalSessions,
+            usedSessions: stu.usedSessions,
+            goals: [...(stu.goals || [])],
+            customGoal: stu.customGoal || '',
+            injuries: stu.injuries || ''
+          }
+        };
+      } else {
+        studentModal.value = {
+          show: true,
+          isEdit: false,
+          editId: '',
+          form: { name: '', totalSessions: 12, usedSessions: 0, goals: ['增肌'], customGoal: '', injuries: '' }
+        };
+      }
+    };
+
+    const toggleGoalTag = (tag) => {
+      const idx = studentModal.value.form.goals.indexOf(tag);
+      if (idx > -1) {
+        studentModal.value.form.goals.splice(idx, 1);
+      } else {
+        studentModal.value.form.goals.push(tag);
+      }
+    };
+
+    const saveStudentForm = () => {
+      const f = studentModal.value.form;
+      if (!f.name.trim()) {
+        showToast('請輸入學員姓名');
+        return;
+      }
+
+      const finalCustomGoal = f.goals.includes('其他') ? (f.customGoal || '').trim() : '';
+
+      if (studentModal.value.isEdit) {
+        const target = students.value.find(s => s.id === studentModal.value.editId);
+        if (target) {
+          target.name = f.name.trim();
+          target.totalSessions = f.totalSessions;
+          target.usedSessions = f.usedSessions;
+          target.goals = [...f.goals];
+          target.customGoal = finalCustomGoal;
+          target.injuries = f.injuries.trim();
+        }
+        showToast('學員檔案已更新');
+      } else {
+        const newStu = {
+          id: 'stu_' + Date.now(),
+          name: f.name.trim(),
+          totalSessions: f.totalSessions || 12,
+          usedSessions: f.usedSessions || 0,
+          goals: [...f.goals],
+          customGoal: finalCustomGoal,
+          injuries: f.injuries.trim(),
+          metrics: { weight: null, bodyFat: null, muscleMass: null },
+          logs: []
+        };
+        students.value.unshift(newStu);
+        selectStudent(newStu.id);
+        showToast(`已建立學員「${newStu.name}」`);
+      }
+
+      studentModal.value.show = false;
+      saveToLocal();
+    };
+
+    const confirmDeleteStudent = (stu) => {
+      students.value = students.value.filter(s => s.id !== stu.id);
+      saveToLocal();
+      if (students.value.length > 0) {
+        selectStudent(students.value[0].id);
+      } else {
+        selectedStudentId.value = '';
+      }
+      showToast(`已刪除學員「${stu.name}」`);
+    };
+
+    // ==================== 6. 訓練日誌展開與新增/編輯邏輯 ====================
+    const toggleLogExpand = (logId) => {
+      const idx = expandedLogIds.value.indexOf(logId);
+      if (idx > -1) expandedLogIds.value.splice(idx, 1);
+      else expandedLogIds.value.push(logId);
+    };
+
+    const logModal = ref({
+      show: false,
+      isEdit: false,
+      editId: '',
+      autoDeduct: true,
+      form: {
+        date: '',
+        sessionNumber: 1,
+        focusArea: '全身性肌力訓練',
+        condition: '正常穩定',
+        exercises: []
+      }
+    });
+
+    const createEmptyExercise = () => ({
+      equipmentId: 'dumbbell',
+      name: '',
+      photoUrl: '',
+      machineSetting: '',
+      sets: [{ weight: 10, reps: 12, rpe: 8 }],
+      notes: ''
+    });
+
+    const openLogModal = (existingLog = null) => {
+      if (!currentStudent.value) return;
+      if (existingLog) {
+        logModal.value = {
+          show: true,
+          isEdit: true,
+          editId: existingLog.id,
+          autoDeduct: false,
+          form: JSON.parse(JSON.stringify(existingLog))
+        };
+      } else {
+        const today = new Date().toISOString().split('T')[0];
+        const nextSessionNum = (currentStudent.value.usedSessions || 0) + 1;
+        logModal.value = {
+          show: true,
+          isEdit: false,
+          editId: '',
+          autoDeduct: true,
+          form: {
+            date: today,
+            sessionNumber: nextSessionNum,
+            focusArea: '下肢推 (臀腿)',
+            condition: '正常穩定',
+            exercises: [createEmptyExercise()]
+          }
+        };
+      }
+    };
+
+    // ⚡ 一鍵帶入上次課表
+    const copyLastWorkout = () => {
+      if (sortedLogs.value.length === 0) return;
+      const lastLog = sortedLogs.value[0];
+      logModal.value.form.focusArea = lastLog.focusArea;
+      logModal.value.form.exercises = JSON.parse(JSON.stringify(lastLog.exercises));
+      showToast('已帶入上次訓練動作、圖片與數據！');
+    };
+
+    const addExerciseToForm = () => {
+      logModal.value.form.exercises.push(createEmptyExercise());
+    };
+
+    const removeExerciseFromForm = (exIdx) => {
+      logModal.value.form.exercises.splice(exIdx, 1);
+    };
+
+    const addSetToExercise = (exIdx, copyPrev = false) => {
+      const sets = logModal.value.form.exercises[exIdx].sets;
+      if (copyPrev && sets.length > 0) {
+        const prev = sets[sets.length - 1];
+        sets.push({ weight: prev.weight, reps: prev.reps, rpe: prev.rpe });
+      } else {
+        sets.push({ weight: 10, reps: 12, rpe: 8 });
+      }
+    };
+
+    const removeSetFromExercise = (exIdx, sIdx) => {
+      logModal.value.form.exercises[exIdx].sets.splice(sIdx, 1);
+    };
+
+    const saveWorkoutLog = () => {
+      if (!currentStudent.value) return;
+      const f = logModal.value.form;
+      
+      const validExercises = f.exercises.filter(ex => ex.name && ex.name.trim() !== '');
+      if (validExercises.length === 0) {
+        showToast('請至少填寫一個訓練動作或選擇器材名稱');
+        return;
+      }
+
+      if (logModal.value.isEdit) {
+        const idx = currentStudent.value.logs.findIndex(l => l.id === logModal.value.editId);
+        if (idx > -1) {
+          currentStudent.value.logs[idx] = {
+            ...JSON.parse(JSON.stringify(f)),
+            exercises: validExercises
+          };
+        }
+        showToast('訓練紀錄已更新');
+      } else {
+        const newLog = {
+          id: 'log_' + Date.now(),
+          date: f.date,
+          sessionNumber: f.sessionNumber,
+          focusArea: f.focusArea || '綜合訓練',
+          condition: f.condition,
+          exercises: validExercises
+        };
+        currentStudent.value.logs.unshift(newLog);
+        expandedLogIds.value = [newLog.id];
+
+        if (logModal.value.autoDeduct) {
+          if (currentStudent.value.usedSessions < currentStudent.value.totalSessions) {
+            currentStudent.value.usedSessions += 1;
+          }
+        }
+        showToast('已儲存今日訓練紀錄！');
+      }
+
+      logModal.value.show = false;
+      saveToLocal();
+    };
+
+    const deleteLog = (logId) => {
+      if (!currentStudent.value) return;
+      currentStudent.value.logs = currentStudent.value.logs.filter(l => l.id !== logId);
+      saveToLocal();
+      showToast('已刪除該筆訓練日誌');
+    };
+
+    onMounted(() => {
+      loadData();
+    });
+
+    return {
+      students,
+      selectedStudentId,
+      searchQuery,
+      filteredStudents,
+      currentStudent,
+      formatDisplayGoals,
+      getRemainingSessions,
+      sessionPercentage,
+      sortedLogs,
+      showBodyMetrics,
+      isEditingInjury,
+      expandedLogIds,
+      toastMessage,
+      fontScale,
+      applyFontScale,
+      changeFontScale,
+      equipmentLibrary,
+      getMatchedEquipment,
+      getExerciseImage,
+      imagePreviewModal,
+      openImagePreview,
+      selectPresetEquipment,
+      onExerciseNameInput,
+      handleExercisePhotoUpload,
+      clearExercisePhoto,
+      availableGoals,
+      presetExercises,
+      selectStudent,
+      saveInjuryQuickEdit,
+      saveToLocal,
+      clearAllData,
+      adjustSessions,
+      sessionAdjustModal,
+      openSessionAdjustModal,
+      saveSessionAdjust,
+      studentModal,
+      openStudentModal,
+      toggleGoalTag,
+      saveStudentForm,
+      confirmDeleteStudent,
+      toggleLogExpand,
+      logModal,
+      openLogModal,
+      copyLastWorkout,
+      addExerciseToForm,
+      removeExerciseFromForm,
+      addSetToExercise,
+      removeSetFromExercise,
+      saveWorkoutLog,
+      deleteLog
+    };
+  }
+}).mount('#app');
+</script>
+</body>
+</html>
