@@ -622,7 +622,7 @@
               <div class="flex items-center justify-between gap-3 pt-1">
                 <div>
                   <h3 class="text-lg font-extrabold">訓練日誌時間軸</h3>
-                  <p class="text-xs text-slate-500 dark:text-slate-400">共 {{ activeClient.logs.length }} 筆訓練紀錄（點開卡片檢視詳情）</p>
+                  <p class="text-xs text-slate-500 dark:text-slate-400">共 {{ (activeClient.logs || []).length }} 筆訓練紀錄（點開卡片檢視詳情）</p>
                 </div>
                 <button
                   @click="openLogModal()"
@@ -633,7 +633,7 @@
               </div>
 
               <!-- Training Logs Empty State -->
-              <div v-if="activeClient.logs.length === 0" class="ios-glass rounded-3xl p-8 text-center">
+              <div v-if="(activeClient.logs || []).length === 0" class="ios-glass rounded-3xl p-8 text-center">
                 <p class="text-sm font-semibold text-slate-500 dark:text-slate-400 mb-3">
                   {{ activeClient.name }} 還沒有任何訓練紀錄
                 </p>
@@ -645,7 +645,7 @@
               <!-- Collapsible Training Log Cards -->
               <div v-else class="space-y-3">
                 <article
-                  v-for="(log, idx) in activeClient.logs"
+                  v-for="(log, idx) in (activeClient.logs || [])"
                   :key="log.id"
                   class="ios-glass rounded-3xl overflow-hidden"
                 >
@@ -657,13 +657,13 @@
                     <div class="min-w-0">
                       <div class="flex items-center gap-2 flex-wrap">
                         <span class="px-2.5 py-0.5 rounded-xl text-xs font-extrabold theme-bg-soft theme-text">
-                          第 {{ log.sessionNumber || (activeClient.logs.length - idx) }} 堂
+                          第 {{ log.sessionNumber || ((activeClient.logs || []).length - idx) }} 堂
                         </span>
                         <span class="text-sm font-extrabold">{{ log.date }}</span>
                         <span class="text-xs font-bold text-slate-600 dark:text-slate-300">· {{ log.bodyPart || '全身訓練' }}</span>
                       </div>
                       <div class="text-xs text-slate-500 dark:text-slate-400 mt-1 flex flex-wrap items-center gap-x-3 gap-y-1">
-                        <span>動作數：{{ log.exercises.length }}</span>
+                        <span>動作數：{{ (log.exercises || []).length }}</span>
                         <span>總訓練量：{{ calcLogVolume(log).toLocaleString() }} kg</span>
                         <span v-if="log.condition">狀態：{{ log.condition }}</span>
                       </div>
@@ -997,7 +997,7 @@
           <div class="flex items-center justify-between">
             <div class="flex items-center gap-2">
               <h3 class="text-lg font-black">⚙️ 使用者設定</h3>
-              <span class="text-[0.65rem] px-2 py-0.5 rounded-lg theme-bg-soft theme-text font-extrabold">v4.0</span>
+              <span class="text-[0.65rem] px-2 py-0.5 rounded-lg theme-bg-soft theme-text font-extrabold">v4.1</span>
             </div>
             <button @click="showSettingsModal = false" class="btn-glass w-8 h-8 rounded-xl text-sm font-bold">✕</button>
           </div>
@@ -1410,7 +1410,7 @@
             <h3 class="text-lg font-black">{{ editingLogId ? '✏️ 編輯訓練紀錄' : '📝 新增訓練紀錄' }}</h3>
             <div class="flex items-center gap-2">
               <button
-                v-if="!editingLogId && activeClient && activeClient.logs.length > 0"
+                v-if="!editingLogId && activeClient && (activeClient.logs || []).length > 0"
                 @click="importLastWorkout"
                 type="button"
                 class="btn-glass px-3 py-1.5 rounded-xl text-xs font-extrabold theme-text"
@@ -2081,13 +2081,43 @@
             .sort((a, b) => `${a.date} ${a.startTime}`.localeCompare(`${b.date} ${b.startTime}`));
         });
 
+        // Helper: Normalize data pulled from Firebase RTDB (Firebase strips empty arrays like logs:[], goals:[])
+        function toSafeArray(val) {
+          if (Array.isArray(val)) return val.filter(Boolean);
+          if (val && typeof val === 'object') return Object.values(val).filter(Boolean);
+          return [];
+        }
+
+        function normalizeClient(c) {
+          if (!c || typeof c !== 'object') return null;
+          const logs = toSafeArray(c.logs).map(log => ({
+            ...log,
+            exercises: toSafeArray(log.exercises).map(ex => ({
+              ...ex,
+              sets: toSafeArray(ex.sets)
+            }))
+          }));
+          return {
+            ...c,
+            purchasedSessions: Number(c.purchasedSessions) || 0,
+            usedSessions: Number(c.usedSessions) || 0,
+            goals: toSafeArray(c.goals),
+            renewalHistory: toSafeArray(c.renewalHistory),
+            logs
+          };
+        }
+
+        function normalizeClients(raw) {
+          return toSafeArray(raw).map(normalizeClient).filter(Boolean);
+        }
+
         // Persistence
         function loadAll() {
           try {
             const rawClients = localStorage.getItem(STORAGE_KEY_CLIENTS);
             if (rawClients) {
               const parsed = JSON.parse(rawClients);
-              if (Array.isArray(parsed)) clients.value = parsed;
+              clients.value = normalizeClients(parsed);
             }
           } catch (e) {
             clients.value = [];
@@ -2233,19 +2263,16 @@
 
             const remoteTs = Number(data.updatedAt || 0);
             if (force || remoteTs > localUpdatedAt.value) {
-              if (Array.isArray(data.clients)) {
-                clients.value = data.clients;
-                if (!selectedClientId.value && clients.value.length > 0) {
-                  selectedClientId.value = clients.value[0].id;
-                } else if (selectedClientId.value && !clients.value.some(c => c.id === selectedClientId.value)) {
-                  selectedClientId.value = clients.value.length > 0 ? clients.value[0].id : null;
-                }
-                saveClientsToStorage(true);
+              clients.value = normalizeClients(data.clients);
+              if (!selectedClientId.value && clients.value.length > 0) {
+                selectedClientId.value = clients.value[0].id;
+              } else if (selectedClientId.value && !clients.value.some(c => c.id === selectedClientId.value)) {
+                selectedClientId.value = clients.value.length > 0 ? clients.value[0].id : null;
               }
-              if (Array.isArray(data.schedules)) {
-                schedules.value = data.schedules;
-                saveSchedulesToStorage(true);
-              }
+              saveClientsToStorage(true);
+
+              schedules.value = toSafeArray(data.schedules);
+              saveSchedulesToStorage(true);
               localUpdatedAt.value = remoteTs || Date.now();
               try {
                 localStorage.setItem(STORAGE_KEY_LAST_MODIFIED, String(localUpdatedAt.value));
@@ -2358,8 +2385,8 @@
           reader.onload = (e) => {
             try {
               const data = JSON.parse(e.target.result);
-              if (Array.isArray(data.clients)) clients.value = data.clients;
-              if (Array.isArray(data.schedules)) schedules.value = data.schedules;
+              if (data.clients) clients.value = normalizeClients(data.clients);
+              if (data.schedules) schedules.value = toSafeArray(data.schedules);
               if (clients.value.length > 0) selectedClientId.value = clients.value[0].id;
               saveClientsToStorage(false);
               saveSchedulesToStorage(false);
