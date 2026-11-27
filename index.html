@@ -997,7 +997,7 @@
           <div class="flex items-center justify-between">
             <div class="flex items-center gap-2">
               <h3 class="text-lg font-black">⚙️ 使用者設定</h3>
-              <span class="text-[0.65rem] px-2 py-0.5 rounded-lg theme-bg-soft theme-text font-extrabold">v4.1</span>
+              <span class="text-[0.65rem] px-2 py-0.5 rounded-lg theme-bg-soft theme-text font-extrabold">v4.2</span>
             </div>
             <button @click="showSettingsModal = false" class="btn-glass w-8 h-8 rounded-xl text-sm font-bold">✕</button>
           </div>
@@ -1176,9 +1176,13 @@
                 />
               </div>
 
-              <div class="text-[0.7rem] text-slate-500 dark:text-slate-400 flex items-center justify-between">
+              <div class="text-[0.7rem] text-slate-500 dark:text-slate-400 flex items-center justify-between gap-2">
                 <span>狀態：<strong :class="cloudSync.status === 'synced' ? 'text-emerald-500' : (cloudSync.status === 'error' ? 'text-rose-500' : 'theme-text')">{{ cloudSyncStatusText }}</strong></span>
                 <span v-if="cloudSync.lastSyncedText">{{ cloudSync.lastSyncedText }}</span>
+              </div>
+              <div class="text-[0.68rem] px-2.5 py-1.5 rounded-xl bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 font-semibold flex items-center justify-between gap-2">
+                <span>⚡ 省流量引擎：僅比對時間戳記</span>
+                <span v-if="cloudSync.savedChecks > 0">已省下 {{ cloudSync.savedChecks }} 次完整下載</span>
               </div>
 
               <div class="grid grid-cols-2 gap-2">
@@ -1919,7 +1923,8 @@
           roomId: '',
           status: 'idle', // 'idle' | 'syncing' | 'synced' | 'error'
           lastSyncedText: '',
-          errorMsg: ''
+          errorMsg: '',
+          savedChecks: 0
         });
         const localUpdatedAt = ref(0);
 
@@ -2193,12 +2198,22 @@
           } catch (e) {}
         }
 
-        function getCloudEndpoint() {
+        function getCloudBaseRoomUrl() {
           const base = (cloudSync.value.dbUrl || '').trim().replace(/\/+$/, '');
           const room = (cloudSync.value.roomId || '').trim().replace(/[.#$\[\]\/\s]/g, '_');
           if (!base || !room) return null;
           const cleanBase = base.startsWith('http') ? base : ('https://' + base);
-          return `${cleanBase}/procoach_sync/${encodeURIComponent(room)}.json`;
+          return `${cleanBase}/procoach_sync/${encodeURIComponent(room)}`;
+        }
+
+        function getCloudEndpoint() {
+          const roomUrl = getCloudBaseRoomUrl();
+          return roomUrl ? `${roomUrl}.json` : null;
+        }
+
+        function getCloudTimestampEndpoint() {
+          const roomUrl = getCloudBaseRoomUrl();
+          return roomUrl ? `${roomUrl}/updatedAt.json` : null;
         }
 
         function formatNowTime() {
@@ -2243,16 +2258,49 @@
 
         async function pullFromCloud(force = false) {
           const url = getCloudEndpoint();
-          if (!cloudSync.value.enabled || !url) return false;
-          cloudSync.value.status = 'syncing';
+          const tsUrl = getCloudTimestampEndpoint();
+          if (!cloudSync.value.enabled || !url || !tsUrl) return false;
+
           cloudSync.value.errorMsg = '';
           try {
+            // Phase 1 (Lightweight ~13 bytes): Check remote updatedAt timestamp first unless force=true
+            if (!force) {
+              const tsRes = await fetch(tsUrl, { method: 'GET', cache: 'no-store' });
+              if (!tsRes.ok) throw new Error('HTTP ' + tsRes.status);
+              const remoteTsRaw = await tsRes.json();
+
+              if (remoteTsRaw === null || remoteTsRaw === undefined) {
+                // Cloud is empty: upload local data if any exists, no full GET needed
+                if (clients.value.length > 0 || schedules.value.length > 0) {
+                  return await pushToCloud();
+                }
+                cloudSync.value.status = 'synced';
+                cloudSync.value.lastSyncedText = '已連線 ' + formatNowTime();
+                return true;
+              }
+
+              const remoteTs = Number(remoteTsRaw || 0);
+              if (remoteTs === localUpdatedAt.value) {
+                // Identical version -> skip full JSON download completely (saves 99%+ traffic)
+                cloudSync.value.savedChecks = (cloudSync.value.savedChecks || 0) + 1;
+                cloudSync.value.status = 'synced';
+                cloudSync.value.lastSyncedText = '已是最新 ' + formatNowTime();
+                return true;
+              }
+
+              if (localUpdatedAt.value > remoteTs) {
+                // Local is newer -> push directly without downloading old remote payload
+                return await pushToCloud();
+              }
+            }
+
+            // Phase 2: Only download full JSON when remoteTs > localUpdatedAt (or force === true)
+            cloudSync.value.status = 'syncing';
             const res = await fetch(url, { method: 'GET', cache: 'no-store' });
             if (!res.ok) throw new Error('HTTP ' + res.status);
             const data = await res.json();
 
             if (!data) {
-              // Cloud is empty: upload local data if any exists
               if (clients.value.length > 0 || schedules.value.length > 0) {
                 return await pushToCloud();
               }
@@ -2262,27 +2310,23 @@
             }
 
             const remoteTs = Number(data.updatedAt || 0);
-            if (force || remoteTs > localUpdatedAt.value) {
-              clients.value = normalizeClients(data.clients);
-              if (!selectedClientId.value && clients.value.length > 0) {
-                selectedClientId.value = clients.value[0].id;
-              } else if (selectedClientId.value && !clients.value.some(c => c.id === selectedClientId.value)) {
-                selectedClientId.value = clients.value.length > 0 ? clients.value[0].id : null;
-              }
-              saveClientsToStorage(true);
-
-              schedules.value = toSafeArray(data.schedules);
-              saveSchedulesToStorage(true);
-              localUpdatedAt.value = remoteTs || Date.now();
-              try {
-                localStorage.setItem(STORAGE_KEY_LAST_MODIFIED, String(localUpdatedAt.value));
-              } catch (e) {}
-            } else if (localUpdatedAt.value > remoteTs) {
-              return await pushToCloud();
+            clients.value = normalizeClients(data.clients);
+            if (!selectedClientId.value && clients.value.length > 0) {
+              selectedClientId.value = clients.value[0].id;
+            } else if (selectedClientId.value && !clients.value.some(c => c.id === selectedClientId.value)) {
+              selectedClientId.value = clients.value.length > 0 ? clients.value[0].id : null;
             }
+            saveClientsToStorage(true);
+
+            schedules.value = toSafeArray(data.schedules);
+            saveSchedulesToStorage(true);
+            localUpdatedAt.value = remoteTs || Date.now();
+            try {
+              localStorage.setItem(STORAGE_KEY_LAST_MODIFIED, String(localUpdatedAt.value));
+            } catch (e) {}
 
             cloudSync.value.status = 'synced';
-            cloudSync.value.lastSyncedText = '同步於 ' + formatNowTime();
+            cloudSync.value.lastSyncedText = '已更新 ' + formatNowTime();
             return true;
           } catch (err) {
             cloudSync.value.status = 'error';
