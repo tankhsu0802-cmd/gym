@@ -63,29 +63,47 @@
 
     /* Safe area padding for iPhone Notch / Dynamic Island & Home Indicator */
     .pt-safe {
-      padding-top: env(safe-area-inset-top);
+      padding-top: env(safe-area-inset-top, 0px);
+    }
+    /* Guaranteed top clearance when launched as iPhone Home Screen Web App (PWA) */
+    @media all and (display-mode: standalone) {
+      .pt-safe {
+        padding-top: max(env(safe-area-inset-top, 0px), 48px) !important;
+      }
+    }
+    html.ios-standalone .pt-safe {
+      padding-top: max(env(safe-area-inset-top, 0px), 50px) !important;
     }
     .pb-safe {
-      padding-bottom: max(0.65rem, env(safe-area-inset-bottom));
+      padding-bottom: max(0.65rem, env(safe-area-inset-bottom, 0px));
     }
 
     /* Fix iOS Safari native date/time/range/select overflow inside grid & flex */
     input, select, textarea {
-      min-width: 0;
-      max-width: 100%;
+      min-width: 0 !important;
+      max-width: 100% !important;
+      box-sizing: border-box !important;
     }
     input[type="date"],
     input[type="time"] {
       -webkit-appearance: none;
       appearance: none;
-      display: block;
-      width: 100%;
-      min-width: 0;
-      max-width: 100%;
-      min-height: 2.55rem;
+      display: flex;
+      align-items: center;
+      width: 100% !important;
+      min-width: 0 !important;
+      max-width: 100% !important;
+      min-height: 2.6rem;
+      line-height: 1.25;
+      overflow: hidden;
+    }
+    input[type="date"]::-webkit-date-and-time-value,
+    input[type="time"]::-webkit-date-and-time-value {
+      text-align: left;
     }
     .modal-box {
-      overflow-x: hidden;
+      overflow-x: hidden !important;
+      max-width: 100%;
     }
 
     /* Dynamic Ambient Gradient Orbs for iPhone Frosted Glass Refraction */
@@ -355,8 +373,18 @@
           </div>
           <div class="min-w-0">
             <h1 class="text-base font-extrabold tracking-tight truncate">ProCoach</h1>
-            <p class="text-[0.7rem] text-slate-500 dark:text-slate-400 truncate">
-              {{ currentTab === 'clients' ? '私人教練學員訓練紀錄系統' : '排課行事曆與系統同步' }}
+            <p class="text-[0.7rem] text-slate-500 dark:text-slate-400 truncate flex items-center gap-1.5">
+              <span>{{ currentTab === 'clients' ? '學員訓練紀錄' : '排課行事曆' }}</span>
+              <span
+                v-if="cloudSync.enabled && cloudSync.dbUrl && cloudSync.roomId"
+                @click="syncNowManual"
+                class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[0.62rem] font-bold cursor-pointer"
+                :class="cloudSync.status === 'synced' ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-300' : (cloudSync.status === 'syncing' ? 'bg-sky-500/15 text-sky-600 dark:text-sky-300' : 'bg-rose-500/15 text-rose-500')"
+                title="點擊立即同步雲端資料"
+              >
+                <span class="w-1.5 h-1.5 rounded-full" :class="cloudSync.status === 'synced' ? 'bg-emerald-500' : (cloudSync.status === 'syncing' ? 'bg-sky-500 animate-ping' : 'bg-rose-500')"></span>
+                <span>{{ cloudSync.status === 'synced' ? '雲端已同步' : (cloudSync.status === 'syncing' ? '同步中...' : '同步異常') }}</span>
+              </span>
             </p>
           </div>
         </div>
@@ -967,7 +995,10 @@
       <div v-if="showSettingsModal" @click.self="showSettingsModal = false" class="fixed inset-0 z-50 bg-slate-950/50 backdrop-blur-sm flex items-center justify-center p-4">
         <div class="modal-box ios-glass-strong rounded-3xl w-full max-w-md p-6 space-y-4 max-h-[90vh] overflow-y-auto">
           <div class="flex items-center justify-between">
-            <h3 class="text-lg font-black">⚙️ 使用者設定</h3>
+            <div class="flex items-center gap-2">
+              <h3 class="text-lg font-black">⚙️ 使用者設定</h3>
+              <span class="text-[0.65rem] px-2 py-0.5 rounded-lg theme-bg-soft theme-text font-extrabold">v4.0</span>
+            </div>
             <button @click="showSettingsModal = false" class="btn-glass w-8 h-8 rounded-xl text-sm font-bold">✕</button>
           </div>
 
@@ -1054,8 +1085,8 @@
             </div>
 
             <div v-if="settings.reminderEnabled" class="space-y-3 pt-1 border-t border-slate-200/60 dark:border-white/10">
-              <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                <div class="min-w-0">
+              <div class="space-y-2.5">
+                <div class="w-full overflow-hidden">
                   <label class="block text-xs font-bold mb-1">每日通知時間</label>
                   <input
                     v-model="settings.reminderTime"
@@ -1064,7 +1095,7 @@
                     class="ios-input w-full px-3 py-2 rounded-xl text-xs font-bold"
                   />
                 </div>
-                <div>
+                <div class="w-full overflow-hidden">
                   <label class="block text-xs font-bold mb-1">提醒次數（次/日）</label>
                   <select
                     v-model.number="settings.reminderCount"
@@ -1104,6 +1135,96 @@
               >
                 🔔 立即測試隔天排課提醒
               </button>
+            </div>
+          </div>
+
+          <!-- NEW: Cross-Device Real-Time Cloud Sync (Firebase RTDB REST) -->
+          <div class="p-4 rounded-2xl bg-white/50 dark:bg-slate-900/50 space-y-3 border theme-border">
+            <div class="flex items-center justify-between gap-2">
+              <div>
+                <div class="text-sm font-black">☁️ 跨裝置雲端資料同步</div>
+                <div class="text-xs text-slate-500 dark:text-slate-400">手機、平板、電腦即時同步學員與排課</div>
+              </div>
+              <button
+                @click="toggleCloudSync"
+                class="w-14 h-8 rounded-full p-1 transition-colors duration-300 flex items-center shrink-0"
+                :class="cloudSync.enabled ? 'theme-bg justify-end' : 'bg-slate-300 dark:bg-slate-700 justify-start'"
+              >
+                <span class="w-6 h-6 rounded-full bg-white shadow-md flex items-center justify-center text-xs">
+                  {{ cloudSync.enabled ? '✓' : '✕' }}
+                </span>
+              </button>
+            </div>
+
+            <div v-if="cloudSync.enabled" class="space-y-2.5 pt-2 border-t border-slate-200/60 dark:border-white/10">
+              <div>
+                <label class="block text-xs font-bold mb-1">Firebase 資料庫網址 (Database URL)</label>
+                <input
+                  v-model.trim="cloudSync.dbUrl"
+                  type="url"
+                  placeholder="https://你的專案-default-rtdb.firebaseio.com"
+                  class="ios-input w-full px-3 py-2 rounded-xl text-xs"
+                />
+              </div>
+              <div>
+                <label class="block text-xs font-bold mb-1">專屬同步代碼（所有裝置填同一組）</label>
+                <input
+                  v-model.trim="cloudSync.roomId"
+                  type="text"
+                  placeholder="例：coach_myname_2026（限英數字）"
+                  class="ios-input w-full px-3 py-2 rounded-xl text-xs font-bold"
+                />
+              </div>
+
+              <div class="text-[0.7rem] text-slate-500 dark:text-slate-400 flex items-center justify-between">
+                <span>狀態：<strong :class="cloudSync.status === 'synced' ? 'text-emerald-500' : (cloudSync.status === 'error' ? 'text-rose-500' : 'theme-text')">{{ cloudSyncStatusText }}</strong></span>
+                <span v-if="cloudSync.lastSyncedText">{{ cloudSync.lastSyncedText }}</span>
+              </div>
+
+              <div class="grid grid-cols-2 gap-2">
+                <button
+                  @click="saveAndTestCloudSync"
+                  type="button"
+                  class="btn-theme py-2 px-3 rounded-xl text-xs font-extrabold"
+                >
+                  🔗 連線並立即同步
+                </button>
+                <button
+                  @click="copySyncConfigCode"
+                  type="button"
+                  class="btn-glass py-2 px-3 rounded-xl text-xs font-bold"
+                >
+                  📋 複製同步設定碼
+                </button>
+              </div>
+
+              <div class="flex gap-2">
+                <button
+                  @click="pasteSyncConfigCode"
+                  type="button"
+                  class="btn-glass flex-1 py-1.5 px-2.5 rounded-xl text-[0.72rem] font-bold theme-text"
+                >
+                  📥 貼上設定碼一鍵綁定
+                </button>
+                <button
+                  @click="forcePullFromCloud"
+                  type="button"
+                  class="btn-glass py-1.5 px-2.5 rounded-xl text-[0.72rem] font-bold"
+                >
+                  ⬇️ 從雲端拉取
+                </button>
+              </div>
+            </div>
+
+            <!-- Local JSON Backup Fallback -->
+            <div class="pt-2 border-t border-slate-200/60 dark:border-white/10 flex gap-2">
+              <button @click="exportBackupJson" type="button" class="btn-glass flex-1 py-1.5 rounded-xl text-[0.72rem] font-bold">
+                💾 匯出備份檔
+              </button>
+              <label class="btn-glass flex-1 py-1.5 rounded-xl text-[0.72rem] font-bold text-center cursor-pointer">
+                📂 匯入備份檔
+                <input type="file" accept=".json,application/json" class="hidden" @change="importBackupJson" />
+              </label>
             </div>
           </div>
 
@@ -1156,7 +1277,7 @@
                   class="ios-input w-full px-3 py-2 rounded-xl text-xs font-bold"
                 />
               </div>
-              <div>
+              <div class="min-w-0 overflow-hidden">
                 <label class="block text-xs font-bold mb-1">調整新合約到期日</label>
                 <input
                   v-model="renewalForm.newExpiryDate"
@@ -1217,7 +1338,7 @@
               <label class="block text-xs font-bold mb-1">聯絡方式</label>
               <input v-model.trim="clientForm.contact" type="text" placeholder="手機或 LINE" class="ios-input w-full px-3.5 py-2.5 rounded-2xl text-sm" />
             </div>
-            <div>
+            <div class="min-w-0 overflow-hidden">
               <label class="block text-xs font-bold mb-1">合約到期日</label>
               <input v-model="clientForm.expiryDate" type="date" class="ios-input w-full px-3.5 py-2.5 rounded-2xl text-sm" />
             </div>
@@ -1524,11 +1645,11 @@
 
             <!-- Date & Time -->
             <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div class="min-w-0">
+              <div class="min-w-0 overflow-hidden">
                 <label class="block text-xs font-bold mb-1">上課日期 *</label>
                 <input v-model="scheduleForm.date" type="date" class="ios-input w-full px-3 py-2.5 rounded-2xl text-sm" />
               </div>
-              <div>
+              <div class="min-w-0 overflow-hidden">
                 <label class="block text-xs font-bold mb-1">開始時間 *</label>
                 <input v-model="scheduleForm.startTime" type="time" class="ios-input w-full px-3 py-2.5 rounded-2xl text-sm" />
               </div>
@@ -1751,6 +1872,8 @@
     const STORAGE_KEY_SETTINGS = 'procoach_settings_v3';
     const STORAGE_KEY_SCHEDULES = 'procoach_schedules_v1';
     const STORAGE_KEY_REMINDER_STATE = 'procoach_reminder_state_v1';
+    const STORAGE_KEY_CLOUD_CFG = 'procoach_cloud_cfg_v1';
+    const STORAGE_KEY_LAST_MODIFIED = 'procoach_last_modified_v1';
 
     createApp({
       setup() {
@@ -1786,6 +1909,28 @@
         const notifPermission = ref('Notification' in window ? Notification.permission : 'unsupported');
         const reminderBanner = ref({ show: false, title: '', body: '', countTag: '' });
         let reminderIntervalId = null;
+        let cloudPollIntervalId = null;
+        let cloudPushTimer = null;
+
+        // Cross-device Cloud Sync state (Firebase Realtime Database REST)
+        const cloudSync = ref({
+          enabled: false,
+          dbUrl: '',
+          roomId: '',
+          status: 'idle', // 'idle' | 'syncing' | 'synced' | 'error'
+          lastSyncedText: '',
+          errorMsg: ''
+        });
+        const localUpdatedAt = ref(0);
+
+        const cloudSyncStatusText = computed(() => {
+          if (!cloudSync.value.enabled) return '未啟用';
+          if (!cloudSync.value.dbUrl || !cloudSync.value.roomId) return '請填入資料庫網址與同步代碼';
+          if (cloudSync.value.status === 'syncing') return '同步中...';
+          if (cloudSync.value.status === 'synced') return '已與雲端即時同步';
+          if (cloudSync.value.status === 'error') return cloudSync.value.errorMsg || '連線失敗，請檢查網址與權限';
+          return '待機中';
+        });
 
         // Calendar navigation state
         const nowInit = new Date();
@@ -1971,21 +2116,260 @@
               expandedLogIds.value = [clients.value[0].logs[0].id];
             }
           }
+          try {
+            const rawCloud = localStorage.getItem(STORAGE_KEY_CLOUD_CFG);
+            if (rawCloud) {
+              Object.assign(cloudSync.value, JSON.parse(rawCloud));
+            }
+            const rawTs = Number(localStorage.getItem(STORAGE_KEY_LAST_MODIFIED) || 0);
+            if (rawTs) localUpdatedAt.value = rawTs;
+          } catch (e) {}
+
           applySettings();
         }
 
-        function saveClientsToStorage() {
+        function markLocalModifiedAndPush() {
+          localUpdatedAt.value = Date.now();
+          try {
+            localStorage.setItem(STORAGE_KEY_LAST_MODIFIED, String(localUpdatedAt.value));
+          } catch (e) {}
+          scheduleCloudPush();
+        }
+
+        function saveClientsToStorage(skipCloud = false) {
           try {
             localStorage.setItem(STORAGE_KEY_CLIENTS, JSON.stringify(clients.value));
           } catch (e) {
             alert('瀏覽器儲存空間已滿，建議刪除部分舊照片或減少高畫質圖片。');
           }
+          if (!skipCloud) markLocalModifiedAndPush();
         }
 
-        function saveSchedulesToStorage() {
+        function saveSchedulesToStorage(skipCloud = false) {
           try {
             localStorage.setItem(STORAGE_KEY_SCHEDULES, JSON.stringify(schedules.value));
           } catch (e) {}
+          if (!skipCloud) markLocalModifiedAndPush();
+        }
+
+        // ==================== Cross-Device Cloud Sync Engine ====================
+        function saveCloudConfig() {
+          try {
+            localStorage.setItem(STORAGE_KEY_CLOUD_CFG, JSON.stringify({
+              enabled: cloudSync.value.enabled,
+              dbUrl: cloudSync.value.dbUrl,
+              roomId: cloudSync.value.roomId
+            }));
+          } catch (e) {}
+        }
+
+        function getCloudEndpoint() {
+          const base = (cloudSync.value.dbUrl || '').trim().replace(/\/+$/, '');
+          const room = (cloudSync.value.roomId || '').trim().replace(/[.#$\[\]\/\s]/g, '_');
+          if (!base || !room) return null;
+          const cleanBase = base.startsWith('http') ? base : ('https://' + base);
+          return `${cleanBase}/procoach_sync/${encodeURIComponent(room)}.json`;
+        }
+
+        function formatNowTime() {
+          const d = new Date();
+          return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}:${String(d.getSeconds()).padStart(2, '0')}`;
+        }
+
+        function scheduleCloudPush() {
+          if (!cloudSync.value.enabled || !getCloudEndpoint()) return;
+          if (cloudPushTimer) clearTimeout(cloudPushTimer);
+          cloudPushTimer = setTimeout(() => {
+            pushToCloud();
+          }, 500);
+        }
+
+        async function pushToCloud() {
+          const url = getCloudEndpoint();
+          if (!cloudSync.value.enabled || !url) return false;
+          cloudSync.value.status = 'syncing';
+          cloudSync.value.errorMsg = '';
+          try {
+            const payload = {
+              updatedAt: localUpdatedAt.value || Date.now(),
+              clients: clients.value,
+              schedules: schedules.value
+            };
+            const res = await fetch(url, {
+              method: 'PUT',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(payload)
+            });
+            if (!res.ok) throw new Error('HTTP ' + res.status);
+            cloudSync.value.status = 'synced';
+            cloudSync.value.lastSyncedText = '更新於 ' + formatNowTime();
+            return true;
+          } catch (err) {
+            cloudSync.value.status = 'error';
+            cloudSync.value.errorMsg = '上傳失敗：' + err.message;
+            return false;
+          }
+        }
+
+        async function pullFromCloud(force = false) {
+          const url = getCloudEndpoint();
+          if (!cloudSync.value.enabled || !url) return false;
+          cloudSync.value.status = 'syncing';
+          cloudSync.value.errorMsg = '';
+          try {
+            const res = await fetch(url, { method: 'GET', cache: 'no-store' });
+            if (!res.ok) throw new Error('HTTP ' + res.status);
+            const data = await res.json();
+
+            if (!data) {
+              // Cloud is empty: upload local data if any exists
+              if (clients.value.length > 0 || schedules.value.length > 0) {
+                return await pushToCloud();
+              }
+              cloudSync.value.status = 'synced';
+              cloudSync.value.lastSyncedText = '已連線 ' + formatNowTime();
+              return true;
+            }
+
+            const remoteTs = Number(data.updatedAt || 0);
+            if (force || remoteTs > localUpdatedAt.value) {
+              if (Array.isArray(data.clients)) {
+                clients.value = data.clients;
+                if (!selectedClientId.value && clients.value.length > 0) {
+                  selectedClientId.value = clients.value[0].id;
+                } else if (selectedClientId.value && !clients.value.some(c => c.id === selectedClientId.value)) {
+                  selectedClientId.value = clients.value.length > 0 ? clients.value[0].id : null;
+                }
+                saveClientsToStorage(true);
+              }
+              if (Array.isArray(data.schedules)) {
+                schedules.value = data.schedules;
+                saveSchedulesToStorage(true);
+              }
+              localUpdatedAt.value = remoteTs || Date.now();
+              try {
+                localStorage.setItem(STORAGE_KEY_LAST_MODIFIED, String(localUpdatedAt.value));
+              } catch (e) {}
+            } else if (localUpdatedAt.value > remoteTs) {
+              return await pushToCloud();
+            }
+
+            cloudSync.value.status = 'synced';
+            cloudSync.value.lastSyncedText = '同步於 ' + formatNowTime();
+            return true;
+          } catch (err) {
+            cloudSync.value.status = 'error';
+            cloudSync.value.errorMsg = '讀取失敗：' + err.message;
+            return false;
+          }
+        }
+
+        function toggleCloudSync() {
+          cloudSync.value.enabled = !cloudSync.value.enabled;
+          saveCloudConfig();
+          if (cloudSync.value.enabled && getCloudEndpoint()) {
+            pullFromCloud(false);
+          }
+        }
+
+        async function saveAndTestCloudSync() {
+          if (!cloudSync.value.dbUrl || !cloudSync.value.roomId) {
+            alert('請完整填寫 Firebase 資料庫網址與專屬同步代碼');
+            return;
+          }
+          cloudSync.value.enabled = true;
+          saveCloudConfig();
+          const ok = await pullFromCloud(false);
+          if (ok) {
+            alert('✅ 雲端同步連線成功！在其他裝置貼上相同設定即可即時同步資料。');
+          } else {
+            alert('❌ 連線失敗：' + (cloudSync.value.errorMsg || '請檢查 Firebase Database URL 與 Rules 讀寫權限'));
+          }
+        }
+
+        async function syncNowManual() {
+          await pullFromCloud(false);
+        }
+
+        async function forcePullFromCloud() {
+          if (!confirm('確定要強制以雲端最新資料覆蓋目前裝置的資料嗎？')) return;
+          const ok = await pullFromCloud(true);
+          if (ok) alert('✅ 已從雲端拉取最新資料！');
+        }
+
+        function copySyncConfigCode() {
+          if (!cloudSync.value.dbUrl || !cloudSync.value.roomId) {
+            alert('請先填寫資料庫網址與同步代碼');
+            return;
+          }
+          const code = btoa(unescape(encodeURIComponent(JSON.stringify({
+            dbUrl: cloudSync.value.dbUrl.trim(),
+            roomId: cloudSync.value.roomId.trim()
+          }))));
+          if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(code).then(() => {
+              alert('✅ 已複製同步設定碼！請到另一台裝置的「使用者設定 → 貼上設定碼一鍵綁定」。');
+            }).catch(() => {
+              prompt('請手動複製下方同步設定碼：', code);
+            });
+          } else {
+            prompt('請手動複製下方同步設定碼：', code);
+          }
+        }
+
+        async function pasteSyncConfigCode() {
+          const input = prompt('請貼上另一台裝置複製的「同步設定碼」：');
+          if (!input) return;
+          try {
+            const parsed = JSON.parse(decodeURIComponent(escape(atob(input.trim()))));
+            if (!parsed.dbUrl || !parsed.roomId) throw new Error('格式無效');
+            cloudSync.value.dbUrl = parsed.dbUrl;
+            cloudSync.value.roomId = parsed.roomId;
+            cloudSync.value.enabled = true;
+            saveCloudConfig();
+            const ok = await pullFromCloud(true);
+            if (ok) alert('✅ 綁定並同步成功！');
+          } catch (e) {
+            alert('❌ 設定碼格式不正確，請重新複製。');
+          }
+        }
+
+        function exportBackupJson() {
+          const payload = {
+            exportedAt: new Date().toISOString(),
+            clients: clients.value,
+            schedules: schedules.value
+          };
+          const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = `ProCoach_Backup_${toLocalDateStr(new Date())}.json`;
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          setTimeout(() => URL.revokeObjectURL(url), 1000);
+        }
+
+        function importBackupJson(event) {
+          const file = event.target.files && event.target.files[0];
+          if (!file) return;
+          const reader = new FileReader();
+          reader.onload = (e) => {
+            try {
+              const data = JSON.parse(e.target.result);
+              if (Array.isArray(data.clients)) clients.value = data.clients;
+              if (Array.isArray(data.schedules)) schedules.value = data.schedules;
+              if (clients.value.length > 0) selectedClientId.value = clients.value[0].id;
+              saveClientsToStorage(false);
+              saveSchedulesToStorage(false);
+              alert('✅ 備份檔匯入成功！');
+            } catch (err) {
+              alert('❌ 備份檔格式錯誤：' + err.message);
+            }
+          };
+          reader.readAsText(file);
+          event.target.value = '';
         }
 
         function applySettings() {
@@ -2927,14 +3311,42 @@
           }
         }
 
+        function handleVisibilityChange() {
+          if (document.visibilityState === 'visible') {
+            checkTomorrowReminders();
+            if (cloudSync.value.enabled && getCloudEndpoint()) {
+              pullFromCloud(false);
+            }
+          }
+        }
+
         onMounted(() => {
+          // Detect iOS Home Screen standalone mode for guaranteed top notch clearance
+          const isStandalone = window.navigator.standalone === true || window.matchMedia('(display-mode: standalone)').matches;
+          if (isStandalone) {
+            document.documentElement.classList.add('ios-standalone');
+          }
+
           loadAll();
           checkTomorrowReminders();
           reminderIntervalId = setInterval(checkTomorrowReminders, 30000);
+
+          if (cloudSync.value.enabled && getCloudEndpoint()) {
+            pullFromCloud(false);
+          }
+          cloudPollIntervalId = setInterval(() => {
+            if (document.visibilityState === 'visible' && cloudSync.value.enabled && getCloudEndpoint()) {
+              pullFromCloud(false);
+            }
+          }, 12000);
+
+          document.addEventListener('visibilitychange', handleVisibilityChange);
         });
 
         onUnmounted(() => {
           if (reminderIntervalId) clearInterval(reminderIntervalId);
+          if (cloudPollIntervalId) clearInterval(cloudPollIntervalId);
+          document.removeEventListener('visibilitychange', handleVisibilityChange);
         });
 
         return {
@@ -3018,7 +3430,17 @@
           requestNotificationPermission,
           triggerTestReminder,
           goToTomorrowSchedule,
-          exportClientPDF
+          exportClientPDF,
+          cloudSync,
+          cloudSyncStatusText,
+          toggleCloudSync,
+          saveAndTestCloudSync,
+          syncNowManual,
+          forcePullFromCloud,
+          copySyncConfigCode,
+          pasteSyncConfigCode,
+          exportBackupJson,
+          importBackupJson
         };
       }
     }).mount('#app');
